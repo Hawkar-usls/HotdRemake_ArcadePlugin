@@ -85,3 +85,123 @@ jobs:
           path: proof-artifact
           if-no-files-found: error
           retention-days: 30
+
+  probe-hotd-demo-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SOURCE_PAGE: https://fileplanet.download.it/p-46299/The-House-of-the-Dead-Demo
+      DOWNLOAD_URL: https://fileplanet.download.it/p-46299/The-House-of-the-Dead-Demo/download
+      EXPECTED_MD5: adec3d6ca6829a024350ef1fdb890d04
+    steps:
+      - name: Install archive inspection tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq p7zip-full arj file
+
+      - name: Fetch demo into ephemeral runner only
+        id: fetch
+        shell: bash
+        run: |
+          set -u
+          mkdir -p "$RUNNER_TEMP/hotd-probe/report"
+          cd "$RUNNER_TEMP/hotd-probe"
+          : > report/report.env
+          set +e
+          curl --location --retry 3 --retry-all-errors \
+            --user-agent 'Mozilla/5.0 (compatible; HOTD1997-license-probe/1.0)' \
+            --referer "$SOURCE_PAGE" \
+            --output hotd-demo.download \
+            --write-out '%{http_code}\n%{url_effective}\n%{content_type}\n' \
+            "$DOWNLOAD_URL" > curl-meta.txt
+          CURL_RC=$?
+          set -e
+          echo "CURL_RC=$CURL_RC" | tee -a report/report.env
+          sed -n '1p' curl-meta.txt | sed 's/^/HTTP_STATUS=/' | tee -a report/report.env
+          sed -n '2p' curl-meta.txt | sed 's/^/EFFECTIVE_URL=/' | tee -a report/report.env
+          sed -n '3p' curl-meta.txt | sed 's/^/CONTENT_TYPE=/' | tee -a report/report.env
+
+          if [[ "$CURL_RC" -ne 0 || ! -s hotd-demo.download ]]; then
+            echo 'SOURCE_FETCH_PASS=false' | tee -a report/report.env
+            echo 'PACKAGE_IDENTITY_PASS=false' | tee -a report/report.env
+            echo '::warning::Demo source could not be fetched by the GitHub runner.'
+            exit 0
+          fi
+
+          echo 'SOURCE_FETCH_PASS=true' | tee -a report/report.env
+          echo "DOWNLOAD_BYTES=$(stat -c %s hotd-demo.download)" | tee -a report/report.env
+          file -b hotd-demo.download | sed 's/^/DETECTED_TYPE=/' | tee -a report/report.env
+          md5sum hotd-demo.download | tee report/md5.txt
+          sha256sum hotd-demo.download | tee report/sha256.txt
+          ACTUAL_MD5="$(cut -d' ' -f1 report/md5.txt)"
+          echo "ACTUAL_MD5=$ACTUAL_MD5" | tee -a report/report.env
+          if [[ "$ACTUAL_MD5" == "$EXPECTED_MD5" ]]; then
+            echo 'PACKAGE_IDENTITY_PASS=true' | tee -a report/report.env
+          else
+            echo 'PACKAGE_IDENTITY_PASS=false' | tee -a report/report.env
+            echo '::warning::Payload MD5 differs from the MD5 published on the FilePlanet page.'
+          fi
+
+      - name: Inspect package without persisting binary
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/hotd-probe"
+          [[ -s hotd-demo.download ]] || exit 0
+          mkdir -p extracted
+          : > report/archive-list.txt
+          if 7z l hotd-demo.download > report/archive-list.txt 2>&1; then
+            7z x -y -oextracted hotd-demo.download >/dev/null || true
+            echo 'ARCHIVE_EXTRACTOR=7z' | tee -a report/report.env
+          elif arj l hotd-demo.download > report/archive-list.txt 2>&1; then
+            (cd extracted && arj x ../hotd-demo.download >/dev/null) || true
+            echo 'ARCHIVE_EXTRACTOR=arj' | tee -a report/report.env
+          else
+            echo 'ARCHIVE_EXTRACTOR=none' | tee -a report/report.env
+          fi
+          find extracted -type f -printf '%P\n' | sort > report/extracted-files.txt || true
+          sed -n '1,180p' report/archive-list.txt || true
+
+      - name: Locate license and redistribution evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/hotd-probe"
+          : > report/candidate-text-files.txt
+          : > report/license-evidence.txt
+          if [[ -d extracted ]]; then
+            find extracted -type f \
+              \( -iname 'readme*' -o -iname 'license*' -o -iname 'licence*' -o -iname 'eula*' -o -iname '*.txt' -o -iname '*.rtf' \) \
+              -printf '%p\n' | sort > report/candidate-text-files.txt || true
+
+            while IFS= read -r f; do
+              [[ -f "$f" ]] || continue
+              echo "===== FILE: ${f#extracted/} =====" >> report/license-evidence.txt
+              strings -n 5 "$f" | grep -E -i -C 2 \
+                'redistribut|distribut|copy|shareware|freeware|demo|license|licence|permission|may be (freely )?(copied|distributed)|not for resale' \
+                | head -n 120 >> report/license-evidence.txt || true
+            done < report/candidate-text-files.txt
+          fi
+
+          if [[ -s report/license-evidence.txt ]]; then
+            echo 'LICENSE_TEXT_FOUND=true' | tee -a report/report.env
+            sed -n '1,240p' report/license-evidence.txt
+          else
+            echo 'LICENSE_TEXT_FOUND=false' | tee -a report/report.env
+            echo 'No explicit redistribution/license text found by automated extraction.'
+          fi
+          echo "EXPECTED_MD5=$EXPECTED_MD5" | tee -a report/report.env
+          echo "SOURCE_PAGE=$SOURCE_PAGE" | tee -a report/report.env
+          echo 'BINARY_PERSISTED=NO' | tee -a report/report.env
+          echo 'BINARY_UPLOADED=NO' | tee -a report/report.env
+
+      - name: Upload report only — never the demo binary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hotd1997-demo-source-report
+          path: ${{ runner.temp }}/hotd-probe/report
+          if-no-files-found: warn
+          retention-days: 30
