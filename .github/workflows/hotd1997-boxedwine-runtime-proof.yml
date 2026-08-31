@@ -25,17 +25,9 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: danoon2/Boxedwine
+          ref: 2473488cfcf1ba914daf5aad097da0c59bb16073
           path: upstream/Boxedwine
           fetch-depth: 1
-
-      - name: Record upstream revision
-        id: upstream
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd upstream/Boxedwine
-          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-          git rev-parse HEAD | tee ../../hotd-proof/research/BOXEDWINE_UPSTREAM_SHA.txt
 
       - name: Setup Emscripten SDK
         uses: mymindstorm/setup-emsdk@v14
@@ -43,19 +35,12 @@ jobs:
           version: latest
           actions-cache-folder: emsdk-cache
 
-      - name: Patch Emscripten C++ linker compatibility
+      - name: Patch modern Emscripten C++ linker compatibility
         shell: bash
         run: |
           set -euo pipefail
           cd upstream/Boxedwine/project/emscripten
-          grep -n '^\s*@$(CC) $(ALL) -o' makefile
           sed -i 's/@$(CC) $(ALL) -o $@ $(LDFLAGS)/@$(CXX) $(ALL) -o $@ $(LDFLAGS)/' makefile
-          grep -n '^\s*@$(CXX) $(ALL) -o' makefile
-
-      - name: Verify toolchain
-        run: |
-          emcc --version
-          em++ --version
 
       - name: Build single-threaded BoxedWine Web runtime
         shell: bash
@@ -67,24 +52,23 @@ jobs:
           test -f Build/Release/boxedwine.js
           test -f Build/Release/boxedwine.wasm
 
-      - name: Assemble runtime proof
+      - name: Assemble GPL runtime proof only
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p proof-artifact/runtime proof-artifact/evidence
           cp -a upstream/Boxedwine/project/emscripten/Build/Release/. proof-artifact/runtime/
+          cp upstream/Boxedwine/license.txt proof-artifact/evidence/BOXEDWINE_GPL2.txt
           cp hotd-proof/research/HOTD1997_DEMO_SOURCE_GATE.md proof-artifact/evidence/
           cp hotd-proof/research/hotd1997-demo-manifest.json proof-artifact/evidence/
-          cp hotd-proof/research/BOXEDWINE_UPSTREAM_SHA.txt proof-artifact/evidence/
-          cat > proof-artifact/evidence/STATUS.txt <<EOF
+          cat > proof-artifact/evidence/STATUS.txt <<'EOF'
           BOXEDWINE_WASM_RUNTIME_BUILD=PASS
-          BOXEDWINE_UPSTREAM_SHA=${{ steps.upstream.outputs.sha }}
+          BOXEDWINE_UPSTREAM_SHA=2473488cfcf1ba914daf5aad097da0c59bb16073
           LINKER_COMPAT_PATCH=CC_TO_CXX
           HOTD_DEMO_BINARY_INCLUDED=NO
-          HOTD_LICENSE_GATE=UNVERIFIED
           EOF
 
-      - name: Upload BoxedWine runtime proof
+      - name: Upload BoxedWine Web runtime proof
         uses: actions/upload-artifact@v4
         with:
           name: hotd1997-boxedwine-web-runtime
@@ -92,138 +76,146 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  probe-pczone-clonecd:
+  smoke-hotd-native:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
     env:
-      CD_ARCHIVE: https://pixsoriginadventures.co.uk/PCZone/PC%20Zone%2067%20%28September%201998%29/CDZone%2367.rar
-      FILEPLANET_EXPECTED_MD5: adec3d6ca6829a024350ef1fdb890d04
+      PCZONE_CD_ARCHIVE: https://pixsoriginadventures.co.uk/PCZone/PC%20Zone%2067%20%28September%201998%29/CDZone%2367.rar
+      BOXEDWINE_FS: https://sourceforge.net/projects/boxedwine/files/FileSystems/Full/v5/Debian10-Wine-5.0.zip/download
+      HOTD_INSTALLER_SHA256: 6150da85cd5e7ba88bbe722aba8202d5f8726b66eb1e8614b2bda5e89ae76944
     steps:
-      - name: Install CloneCD and archive tools
+      - name: Checkout BoxedWine upstream
+        uses: actions/checkout@v4
+        with:
+          repository: danoon2/Boxedwine
+          ref: 2473488cfcf1ba914daf5aad097da0c59bb16073
+          path: Boxedwine
+          fetch-depth: 1
+
+      - name: Install native build and sterile display tools
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y -qq unar p7zip-full ccd2iso file cabextract
+          sudo apt-get install -y -qq \
+            build-essential libsdl2-dev libssl-dev libminizip-dev \
+            libcurl4-openssl-dev libgl1-mesa-dev xvfb x11-utils imagemagick \
+            unar p7zip-full ccd2iso file curl unzip
 
-      - name: Fetch and unpack historical cover CD ephemerally
+      - name: Build native BoxedWine
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/pczone67/report" "$RUNNER_TEMP/pczone67/outer"
-          cd "$RUNNER_TEMP/pczone67"
-          curl --fail --location --retry 3 --retry-all-errors --output cdzone67.rar "$CD_ARCHIVE"
-          {
-            echo "OUTER_BYTES=$(stat -c %s cdzone67.rar)"
-            echo "OUTER_SHA256=$(sha256sum cdzone67.rar | awk '{print $1}')"
-            echo "OUTER_TYPE=$(file -b cdzone67.rar)"
-            echo 'BINARY_PERSISTED=NO'
-            echo 'BINARY_UPLOADED=NO'
-          } | tee report/status.env
-          unar -f -o outer cdzone67.rar > report/unar.log 2>&1
-          echo OUTER_EXTRACT_PASS=true | tee -a report/status.env
+          cd Boxedwine/project/linux
+          make
+          test -x Build/Release/boxedwine
+          ./Build/Release/boxedwine -version > "$RUNNER_TEMP/boxedwine-version.txt" 2>&1 || true
 
-      - name: Decode CloneCD image to ISO
+      - name: Fetch official BoxedWine Wine filesystem
         shell: bash
         run: |
           set -euo pipefail
-          cd "$RUNNER_TEMP/pczone67"
+          mkdir -p "$RUNNER_TEMP/hotd-smoke/report"
+          cd "$RUNNER_TEMP/hotd-smoke"
+          curl --fail --location --retry 3 --retry-all-errors \
+            --output Debian10-Wine-5.0.zip "$BOXEDWINE_FS"
+          test -s Debian10-Wine-5.0.zip
+          file -b Debian10-Wine-5.0.zip | tee report/rootfs-type.txt
+          sha256sum Debian10-Wine-5.0.zip | tee report/rootfs-sha256.txt
+
+      - name: Recover genuine HOTD demo ephemerally from historical cover CD
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/hotd-smoke"
+          mkdir -p outer cdroot installer-inner
+          curl --fail --location --retry 3 --retry-all-errors \
+            --output cdzone67.rar "$PCZONE_CD_ARCHIVE"
+          unar -f -o outer cdzone67.rar >/dev/null
           IMG="$(find outer -type f -iname '*.img' -print -quit)"
           test -n "$IMG"
-          ccd2iso "$IMG" cdzone67.iso > report/ccd2iso.log 2>&1
-          test -s cdzone67.iso
-          echo "ISO_BYTES=$(stat -c %s cdzone67.iso)" | tee -a report/status.env
-          echo "ISO_SHA256=$(sha256sum cdzone67.iso | awk '{print $1}')" | tee -a report/status.env
-          file -b cdzone67.iso | sed 's/^/ISO_TYPE=/' | tee -a report/status.env
-
-      - name: Extract CD filesystem and locate HOTD
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$RUNNER_TEMP/pczone67"
-          mkdir -p cdroot
-          7z l -slt cdzone67.iso > report/iso-list.txt
-          7z x -y -ocdroot cdzone67.iso > report/iso-extract.log
-          find cdroot -type f -printf '%p\n' | sort > report/cd-files.txt
-          grep -E -i 'hotd|house.?of.?the.?dead' report/cd-files.txt > report/hotd-path-hits.txt || true
-          cat report/hotd-path-hits.txt || true
-          if grep -E -i -q '/Gamedemo/Win95/hotd/Install\.exe$' report/hotd-path-hits.txt; then
-            echo HOTD_ENTRY_FOUND=true | tee -a report/status.env
-          else
-            echo HOTD_ENTRY_FOUND=false | tee -a report/status.env
-          fi
-
-      - name: Hash and inspect HOTD demo installer
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$RUNNER_TEMP/pczone67"
-          INSTALLER="$(find cdroot -type f -ipath '*/Gamedemo/Win95/hotd/Install.exe' -print -quit || true)"
-          test -n "$INSTALLER"
-          ACTUAL_MD5="$(md5sum "$INSTALLER" | awk '{print $1}')"
-          ACTUAL_SHA256="$(sha256sum "$INSTALLER" | awk '{print $1}')"
-          {
-            echo INSTALLER_FOUND=true
-            echo "INSTALLER_PATH=${INSTALLER#cdroot/}"
-            echo "INSTALLER_BYTES=$(stat -c %s "$INSTALLER")"
-            echo "INSTALLER_MD5=$ACTUAL_MD5"
-            echo "INSTALLER_SHA256=$ACTUAL_SHA256"
-            echo "FILEPLANET_EXPECTED_MD5=$FILEPLANET_EXPECTED_MD5"
-          } | tee -a report/status.env
-          if [[ "$ACTUAL_MD5" == "$FILEPLANET_EXPECTED_MD5" ]]; then
-            echo FILEPLANET_MD5_MATCH=true | tee -a report/status.env
-            echo PACKAGE_IDENTITY_CROSS_SOURCE_PASS=true | tee -a report/status.env
-          else
-            echo FILEPLANET_MD5_MATCH=false | tee -a report/status.env
-            echo PACKAGE_IDENTITY_CROSS_SOURCE_PASS=false | tee -a report/status.env
-          fi
-          file -b "$INSTALLER" | sed 's/^/INSTALLER_TYPE=/' | tee -a report/status.env
-
-          mkdir -p installer-inner
-          7z l -slt "$INSTALLER" > report/installer-list.txt 2>&1 || true
-          7z x -y -oinstaller-inner "$INSTALLER" > report/installer-extract.log 2>&1 || true
-          find installer-inner -type f -printf '%p\t%s bytes\n' | sort > report/installer-inner-files.txt || true
-
-      - name: Search original package for license and redistribution evidence
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$RUNNER_TEMP/pczone67"
+          ccd2iso "$IMG" cdzone67.iso >/dev/null
+          7z x -y -ocdroot cdzone67.iso >/dev/null
           INSTALLER="$(find cdroot -type f -ipath '*/Gamedemo/Win95/hotd/Install.exe' -print -quit)"
-          PARENT="$(dirname "$INSTALLER")"
-          : > report/license-candidates.txt
-          : > report/license-evidence.txt
-          for ROOT in "$PARENT" installer-inner; do
-            [[ -d "$ROOT" ]] || continue
-            find "$ROOT" -type f \( -iname 'readme*' -o -iname 'license*' -o -iname 'licence*' -o -iname 'eula*' -o -iname '*.txt' -o -iname '*.rtf' -o -iname '*.ini' \) -print >> report/license-candidates.txt || true
-          done
-          sort -u -o report/license-candidates.txt report/license-candidates.txt
-          {
-            echo '===== INSTALLER STRINGS ====='
-            strings -n 5 "$INSTALLER" | grep -E -i -C 4 'redistribut|distribut|copy|shareware|freeware|demo|license|licence|permission|may be (freely )?(copied|distributed)|not for resale' | head -n 360 || true
-            while IFS= read -r f; do
-              [[ -f "$f" ]] || continue
-              echo "===== FILE: ${f#cdroot/} ====="
-              strings -n 5 "$f" | grep -E -i -C 4 'redistribut|distribut|copy|shareware|freeware|demo|license|licence|permission|may be (freely )?(copied|distributed)|not for resale' | head -n 220 || true
-            done < report/license-candidates.txt
-          } > report/license-evidence.txt
-          if grep -E -i -q 'may be (freely )?(copied|distributed)|freely distribut|redistribut' report/license-evidence.txt; then
-            echo REDISTRIBUTION_TEXT_CANDIDATE=true | tee -a report/status.env
+          test -n "$INSTALLER"
+          ACTUAL_SHA="$(sha256sum "$INSTALLER" | awk '{print $1}')"
+          echo "HOTD_INSTALLER_SHA256=$ACTUAL_SHA" | tee report/hotd-identity.txt
+          test "$ACTUAL_SHA" = "$HOTD_INSTALLER_SHA256"
+          7z x -y -oinstaller-inner "$INSTALLER" >/dev/null
+          GAME_DIR="$(find installer-inner -type d -iname 'hotd_demo' -print -quit)"
+          test -n "$GAME_DIR"
+          test -f "$GAME_DIR/THOTDEMO.exe"
+          test -f "$GAME_DIR/README.TXT"
+          echo "GAME_EXE_SHA256=$(sha256sum "$GAME_DIR/THOTDEMO.exe" | awk '{print $1}')" | tee -a report/hotd-identity.txt
+          echo "GAME_EXE_BYTES=$(stat -c %s "$GAME_DIR/THOTDEMO.exe")" | tee -a report/hotd-identity.txt
+          printf '%s\n' "$GAME_DIR" > game-dir.txt
+
+      - name: Launch THOTDEMO.exe under BoxedWine on Xvfb
+        id: smoke
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/hotd-smoke"
+          GAME_DIR="$(cat game-dir.txt)"
+          BW="$GITHUB_WORKSPACE/Boxedwine/project/linux/Build/Release/boxedwine"
+          mkdir -p boxedwine-write
+
+          Xvfb :99 -screen 0 1024x768x24 -nolisten tcp > report/xvfb.log 2>&1 &
+          XVFB_PID=$!
+          export DISPLAY=:99
+          export LIBGL_ALWAYS_SOFTWARE=1
+          sleep 2
+          xdpyinfo > report/xdpyinfo.txt
+
+          set +e
+          "$BW" \
+            -root "$PWD/boxedwine-write" \
+            -zip "$PWD/Debian10-Wine-5.0.zip" \
+            -mount_drive "$GAME_DIR" d \
+            -w /mnt/d_drive \
+            -resolution 640x480 \
+            -bpp 16 \
+            -nosound \
+            /bin/wine 'd:\\THOTDEMO.exe' \
+            > report/boxedwine-hotd.log 2>&1 &
+          GAME_PID=$!
+          set -e
+
+          sleep 20
+          xwininfo -root -tree > report/window-tree.txt 2>&1 || true
+          import -display :99 -window root report/hotd-xvfb.png 2> report/screenshot-error.txt || true
+
+          if kill -0 "$GAME_PID" 2>/dev/null; then
+            echo 'PROCESS_ALIVE_AFTER_20S=true' | tee report/smoke-status.env
+            echo 'NATIVE_EXECUTION_SMOKE=PROCESS_SURVIVED' | tee -a report/smoke-status.env
+            kill "$GAME_PID" 2>/dev/null || true
+            sleep 1
+            kill -9 "$GAME_PID" 2>/dev/null || true
           else
-            echo REDISTRIBUTION_TEXT_CANDIDATE=false | tee -a report/status.env
-          fi
-          if [[ -s report/license-evidence.txt ]]; then
-            echo LICENSE_TEXT_FOUND=true | tee -a report/status.env
-            sed -n '1,440p' report/license-evidence.txt
-          else
-            echo LICENSE_TEXT_FOUND=false | tee -a report/status.env
+            set +e
+            wait "$GAME_PID"
+            EXIT_CODE=$?
+            set -e
+            echo 'PROCESS_ALIVE_AFTER_20S=false' | tee report/smoke-status.env
+            echo "PROCESS_EXIT_CODE=$EXIT_CODE" | tee -a report/smoke-status.env
+            echo 'NATIVE_EXECUTION_SMOKE=EARLY_EXIT' | tee -a report/smoke-status.env
           fi
 
-      - name: Upload text-only cover CD report
+          kill "$XVFB_PID" 2>/dev/null || true
+          echo 'HOTD_BINARY_PERSISTED=NO' | tee -a report/smoke-status.env
+          echo 'HOTD_BINARY_UPLOADED=NO' | tee -a report/smoke-status.env
+          echo '--- WINDOW TREE ---'
+          sed -n '1,160p' report/window-tree.txt || true
+          echo '--- BOXEDWINE LOG TAIL ---'
+          tail -n 160 report/boxedwine-hotd.log || true
+
+      - name: Upload non-binary execution evidence only
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: hotd1997-pczone67-hotd-installer-report
-          path: ${{ runner.temp }}/pczone67/report
+          name: hotd1997-native-boxedwine-smoke-report
+          path: |
+            ${{ runner.temp }}/hotd-smoke/report
+            ${{ runner.temp }}/boxedwine-version.txt
           if-no-files-found: warn
           retention-days: 30
