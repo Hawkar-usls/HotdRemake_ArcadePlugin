@@ -1,22 +1,21 @@
 # HOTD 1997 PC Demo → Browser proof gate
 
-Status: **SOURCE FOUND / BOXEDWINE RUNTIME BUILD PASS / REDISTRIBUTION NOT YET PROVEN / MAIN UNTOUCHED**
+Status: **PACKAGE IDENTITY PASS / BOXEDWINE RUNTIME BUILD PASS / REDISTRIBUTION NOT YET PROVEN / MAIN UNTOUCHED**
 
 ## Goal
 Run the original SEGA *The House of the Dead* Windows demo in a browser using an open-source Windows/Wine runtime, without publishing a retail ROM/disc image.
 
-## Runtime candidate
+## Runtime
 
 - **BoxedWine** — GPL-2.0 open-source x86/Wine emulator with WebAssembly/Web support.
 - Official project: https://github.com/danoon2/Boxedwine
 - Web configuration supports `root`, `app`, `p`, `work`, overlays, local storage and drag/drop app files.
-- Current docs warn that Web/WASM performance is slower than native; old DirectDraw/Direct3D-era titles are the target class, but HOTD itself still needs an execution test.
 
 ### Machine-verified BoxedWine build
 
 `BOXEDWINE_RUNTIME_BUILD_PASS = true`
 
-GitHub Actions run `33447803130`, job `99670699269` completed successfully after applying a CI-only compatibility patch to the upstream Emscripten makefile: the final C++ link was changed from `$(CC)` / `emcc` to `$(CXX)` / `em++`.
+GitHub Actions run `33447803130`, job `99670699269` completed successfully after applying a CI-only Emscripten compatibility patch: the final C++ link was changed from `$(CC)` / `emcc` to `$(CXX)` / `em++`.
 
 Verified outputs:
 
@@ -36,73 +35,109 @@ Runtime proof artifact:
 - artifact name: `hotd1997-boxedwine-web-runtime`
 - artifact SHA-256 digest: `d92e1dc6d891cdeaa34f9dd9bc2cf4599ac9be28fc795c79b8ecc80a3d9f3029`
 
-This is **not yet `BOXEDWINE_WASM_PASS`**: the runtime itself builds, but that final gate requires the actual HOTD demo to launch in-browser with input/audio.
+This is **not yet `BOXEDWINE_WASM_PASS`**: that gate requires the actual HOTD demo to launch with usable graphics/input/audio.
 
-## Demo evidence
+## Demo package identity — PASS
 
-### PC demo package
-Historical archive indexes identify a four-part Windows 95 demo distributed as:
+### Historical archive lineage
+Historical indexes identify a four-part Windows 95 demo distributed as:
 
-- `HOTDDEMO.ARJ` — part 1/4
-- `HOTDDEMO.A01` — part 2/4
-- `HOTDDEMO.A02` — part 3/4
-- `HOTDDEMO.A03` — part 4/4
+- `HOTDDEMO.ARJ`
+- `HOTDDEMO.A01`
+- `HOTDDEMO.A02`
+- `HOTDDEMO.A03`
 
-Metadata: SEGA, Pentium 133, 16 MB RAM, Windows 95, DirectX, 3D acceleration support. Historical date: 1998-06-28.
+Metadata: SEGA, Pentium 133, 16 MB RAM, Windows 95, DirectX, 3D acceleration support; archive date 1998-06-28.
 
-### Current mirror metadata
-FilePlanet/Download.it currently lists **The House of the Dead - Demo** as a free download, developer **SEGA**, size **15.4 MB**, MD5:
+### PC Zone #67 machine-verified package
 
-`adec3d6ca6829a024350ef1fdb890d04`
+A historical PC Zone #67 cover-CD archive was fetched only into an ephemeral GitHub runner.
 
-Source page:
-https://fileplanet.download.it/p-46299/The-House-of-the-Dead-Demo
+Outer RAR:
 
-An automated ephemeral source probe received a `403` HTML anti-bot response from the download endpoint, so FilePlanet has **not** passed package identity verification. No binary from that probe was persisted or uploaded.
+- bytes: `635457476`
+- SHA-256: `1a8695d904886e028b4e14aa59b85934c1d867ed03d2f3a18c9d202691efa1ba`
+- format: RAR v4
 
-### Independent historical distribution evidence
-The demo appears in historical demo archives and magazine cover-media catalogs. A Taiwanese *Computer Player* catalog identifies a Windows 95 HOTD demo directory and installer as `\hotd\hotd_demo.exe`.
-
-PC Zone #67 archival media was machine-probed as a 606 MiB RAR. Its outer archive SHA-256 is:
-
-`1a8695d904886e028b4e14aa59b85934c1d867ed03d2f3a18c9d202691efa1ba`
-
-The RAR contains a CloneCD image set rather than a directly visible filesystem:
+The RAR contains a CloneCD image set:
 
 - `CDZone#67.ccd`
 - `CDZone#67.cue`
 - `CDZone#67.img`
 - `CDZone#67.sub`
 
-The first probe's `7z` extraction segfaulted on the RAR v4 stream before the CD image could be inspected. A successor probe now uses `unar` followed by `ccd2iso` and scans the decoded ISO. This is an extraction-tool fault, not negative evidence about HOTD presence.
+`unar` successfully unpacked the container and `ccd2iso` decoded the image into an ISO 9660 filesystem labeled `DPPCZ0998`.
 
-Historical third-party distribution is strong provenance evidence, but is **not by itself a modern redistribution license**.
+Decoded ISO:
+
+- bytes: `643723264`
+- SHA-256: `0959a52365b22f23ed7f18ff704de67258bf488670c25e9422e4fbea9d6a8104`
+
+The HOTD demo was then found directly in that filesystem at:
+
+`Gamedemo/Win95/hotd/Install.exe`
+
+Installer identity:
+
+- bytes: `15964271`
+- MD5: `f26a2405e5c63f31aa7b2dcdafa27842`
+- SHA-256: `6150da85cd5e7ba88bbe722aba8202d5f8726b66eb1e8614b2bda5e89ae76944`
+- type: `PE32 executable (GUI) Intel 80386, for MS Windows`
+
+The self-extracting archive exposes `hotd_demo/rundemo.exe` and an original `hotd_demo/README.TXT`. The README identifies itself as:
+
+- `The House Of The Dead DEMO`
+- `PC DEMO version 1/5/98`
+- `DEMO (trial) version`
+- installed/run through `RUNDEMO.EXE`
+- requires DirectX 5
+- lightgun support disabled in this demo
+
+This independently establishes that the PC Zone package is a genuine historical HOTD PC demo distribution. Therefore:
+
+`PACKAGE_IDENTITY_PASS = true`
+
+### FilePlanet comparison — distinct package/revision
+
+FilePlanet/Download.it currently lists **The House of the Dead - Demo**, developer **SEGA**, size **15.4 MB**, with MD5:
+
+`adec3d6ca6829a024350ef1fdb890d04`
+
+An automated fetch receives a 403 HTML anti-bot response, so the FilePlanet binary itself was not retrieved. The published FilePlanet MD5 does **not** match the PC Zone installer MD5 (`f26a2405...`). This is treated as evidence of a different wrapper/revision, not evidence against the PC Zone demo's authenticity.
+
+`FILEPLANET_MD5_MATCH = false`
+
+## Redistribution/license gate — still OPEN
+
+The original package README was extracted and inspected. It contains operational/demo notes, but the automated evidence scan found **no explicit text granting redistribution, mirroring, or public hosting permission**.
+
+`REDISTRIBUTION_TEXT_CANDIDATE = false`
+
+Therefore:
+
+`LICENSE_README_PASS = false`
+
+Historical magazine/demo distribution is strong provenance evidence, but is not automatically a modern redistribution license. Until an explicit compatible permission or authorized current source is found, the SEGA demo binary stays out of GitHub and out of published artifacts.
 
 ## Required PASS gates before replacing main
 
-1. **PACKAGE_IDENTITY_PASS**
-   - Obtain the demo package from a reputable historical/free-demo source.
-   - Verify MD5 `adec3d6ca6829a024350ef1fdb890d04` if that exact FilePlanet package is used.
-   - Record SHA-256 as the canonical project hash.
+1. **PACKAGE_IDENTITY_PASS** — **PASS**
+   - Canonical historical PC Zone installer SHA-256: `6150da85cd5e7ba88bbe722aba8202d5f8726b66eb1e8614b2bda5e89ae76944`.
 
-2. **LICENSE_README_PASS**
-   - Inspect the original package README/EULA/license.
-   - Require explicit permission compatible with hosting/mirroring, or use an authorized source that serves the package directly without us mirroring it.
-   - If redistribution is not explicitly allowed, keep the game binary out of GitHub.
+2. **LICENSE_README_PASS** — **OPEN**
+   - Find explicit redistribution/hosting permission or an authorized source that can serve the package without us mirroring it.
 
-3. **BOXEDWINE_NATIVE_PASS**
-   - Install/run the demo under BoxedWine native first, per BoxedWine guidance.
+3. **BOXEDWINE_NATIVE_PASS** — **OPEN**
+   - Launch the extracted demo through BoxedWine in a sterile runtime test.
 
 4. **BOXEDWINE_RUNTIME_BUILD_PASS** — **PASS**
-   - Build the open-source BoxedWine Web/WASM runtime reproducibly on GitHub Actions.
+   - Open-source BoxedWine Web/WASM runtime builds reproducibly.
 
-5. **BOXEDWINE_WASM_PASS**
-   - Package the installed demo into a BoxedWine app/root zip.
-   - Launch in browser with mouse/lightgun mapping and audio.
+5. **BOXEDWINE_WASM_PASS** — **OPEN**
+   - Launch the demo in browser runtime with graphics/input/audio.
 
-6. **PAGES_PASS**
-   - Publish proof build from this research branch or an isolated Pages artifact.
-   - Only after browser execution is verified should `main` be converted from the current playable fallback to HOTD 1997.
+6. **PAGES_PASS** — **OPEN**
+   - Publish only after the execution and source/license path are valid.
 
 ## Safety rule
-Do **not** substitute a retail ROM, Saturn disc, arcade ROM set, abandonware RIP, encrypted copy, or third-party pirate archive if the demo/license gate fails. The whole point of this track is a real SEGA demo with a defensible source chain.
+Do **not** substitute a retail ROM, Saturn disc, arcade ROM set, abandonware RIP, encrypted copy, or unverified pirate bridge if the license gate fails. The target is the genuine historical SEGA demo with a defensible source chain.
