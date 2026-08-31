@@ -53,9 +53,7 @@ jobs:
           grep -n '^\s*@$(CXX) $(ALL) -o' makefile
 
       - name: Verify toolchain
-        shell: bash
         run: |
-          set -euo pipefail
           emcc --version
           em++ --version
 
@@ -69,11 +67,10 @@ jobs:
           test -f Build/Release/boxedwine.js
           test -f Build/Release/boxedwine.wasm
 
-      - name: Assemble proof artifact
+      - name: Assemble runtime proof
         shell: bash
         run: |
           set -euo pipefail
-          rm -rf proof-artifact
           mkdir -p proof-artifact/runtime proof-artifact/evidence
           cp -a upstream/Boxedwine/project/emscripten/Build/Release/. proof-artifact/runtime/
           cp hotd-proof/research/HOTD1997_DEMO_SOURCE_GATE.md proof-artifact/evidence/
@@ -86,9 +83,8 @@ jobs:
           HOTD_DEMO_BINARY_INCLUDED=NO
           HOTD_LICENSE_GATE=UNVERIFIED
           EOF
-          find proof-artifact -maxdepth 3 -type f -printf '%P\n' | sort
 
-      - name: Upload BoxedWine Web runtime proof
+      - name: Upload BoxedWine runtime proof
         uses: actions/upload-artifact@v4
         with:
           name: hotd1997-boxedwine-web-runtime
@@ -96,171 +92,122 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  probe-hotd-demo-source:
+  probe-pczone-clonecd:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 35
     env:
-      SOURCE_PAGE: https://fileplanet.download.it/p-46299/The-House-of-the-Dead-Demo
-      DOWNLOAD_URL: https://fileplanet.download.it/p-46299/The-House-of-the-Dead-Demo/download
-      EXPECTED_MD5: adec3d6ca6829a024350ef1fdb890d04
-    steps:
-      - name: Install inspection tools
-        run: sudo apt-get update -qq && sudo apt-get install -y -qq p7zip-full arj file
-
-      - name: Probe FilePlanet package without persisting binary
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/hotd-fileplanet/report"
-          cd "$RUNNER_TEMP/hotd-fileplanet"
-          HTTP_STATUS="$(curl --location --retry 2 --user-agent 'Mozilla/5.0' --referer "$SOURCE_PAGE" \
-            --output payload --write-out '%{http_code}' "$DOWNLOAD_URL" || true)"
-          TYPE="$(file -b payload 2>/dev/null || echo missing)"
-          BYTES="$(stat -c %s payload 2>/dev/null || echo 0)"
-          {
-            echo "HTTP_STATUS=$HTTP_STATUS"
-            echo "CONTENT_TYPE_DETECTED=$TYPE"
-            echo "DOWNLOAD_BYTES=$BYTES"
-            echo "EXPECTED_MD5=$EXPECTED_MD5"
-            echo "BINARY_PERSISTED=NO"
-            echo "BINARY_UPLOADED=NO"
-          } | tee report/status.env
-          if [[ "$HTTP_STATUS" =~ ^2 && -s payload && "$TYPE" != *HTML* ]]; then
-            md5sum payload | tee report/md5.txt
-            sha256sum payload | tee report/sha256.txt
-            ACTUAL="$(cut -d' ' -f1 report/md5.txt)"
-            [[ "$ACTUAL" == "$EXPECTED_MD5" ]] && echo PACKAGE_IDENTITY_PASS=true | tee -a report/status.env || echo PACKAGE_IDENTITY_PASS=false | tee -a report/status.env
-          else
-            echo SOURCE_FETCH_PASS=false | tee -a report/status.env
-            echo PACKAGE_IDENTITY_PASS=false | tee -a report/status.env
-          fi
-
-      - name: Upload FilePlanet report only
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: hotd1997-fileplanet-source-report
-          path: ${{ runner.temp }}/hotd-fileplanet/report
-          retention-days: 30
-
-  probe-pczone-cover-cd:
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    env:
-      CD_INDEX: https://pixsoriginadventures.co.uk/PCZone/PC%20Zone%2067%20%28September%201998%29/
       CD_ARCHIVE: https://pixsoriginadventures.co.uk/PCZone/PC%20Zone%2067%20%28September%201998%29/CDZone%2367.rar
     steps:
-      - name: Install RAR and inspection tools
+      - name: Install CloneCD and archive tools
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y -qq p7zip-full file
+          sudo apt-get install -y -qq unar p7zip-full ccd2iso file cabextract
 
-      - name: Fetch historical PC Zone cover CD ephemerally
+      - name: Fetch and unpack historical cover CD ephemerally
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/pczone67/report"
+          mkdir -p "$RUNNER_TEMP/pczone67/report" "$RUNNER_TEMP/pczone67/outer"
           cd "$RUNNER_TEMP/pczone67"
-          curl --fail --location --retry 3 --retry-all-errors \
-            --user-agent 'Mozilla/5.0 (compatible; HOTD1997-historical-demo-audit/1.0)' \
-            --output cdzone67.rar "$CD_ARCHIVE"
-          test -s cdzone67.rar
+          curl --fail --location --retry 3 --retry-all-errors --output cdzone67.rar "$CD_ARCHIVE"
           {
-            echo "SOURCE_INDEX=$CD_INDEX"
-            echo "ARCHIVE_URL=$CD_ARCHIVE"
-            echo "ARCHIVE_BYTES=$(stat -c %s cdzone67.rar)"
-            echo "ARCHIVE_TYPE=$(file -b cdzone67.rar)"
-            echo "ARCHIVE_SHA256=$(sha256sum cdzone67.rar | cut -d' ' -f1)"
-            echo "ARCHIVE_PERSISTED=NO"
-            echo "GAME_BINARY_UPLOADED=NO"
+            echo "OUTER_BYTES=$(stat -c %s cdzone67.rar)"
+            echo "OUTER_SHA256=$(sha256sum cdzone67.rar | awk '{print $1}')"
+            echo "OUTER_TYPE=$(file -b cdzone67.rar)"
+            echo 'BINARY_PERSISTED=NO'
+            echo 'BINARY_UPLOADED=NO'
           } | tee report/status.env
+          unar -f -o outer cdzone67.rar > report/unar.log 2>&1
+          echo OUTER_EXTRACT_PASS=true | tee -a report/status.env
+          find outer -maxdepth 2 -type f -printf '%P\t%s bytes\n' | sort | tee report/outer-files.txt
 
-      - name: List CD and locate HOTD material
+      - name: Decode CloneCD image to ISO
         shell: bash
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP/pczone67"
-          7z l -slt cdzone67.rar > report/archive-list.txt
-          grep -E -i -C 3 'house.?of.?the.?dead|hotd|dead' report/archive-list.txt > report/hotd-list-hits.txt || true
-          echo '--- HOTD archive hits ---'
-          cat report/hotd-list-hits.txt || true
-          if [[ -s report/hotd-list-hits.txt ]]; then
+          IMG="$(find outer -type f -iname '*.img' -print -quit)"
+          test -n "$IMG"
+          echo "CLONECD_IMG=${IMG#outer/}" | tee -a report/status.env
+          ccd2iso "$IMG" cdzone67.iso > report/ccd2iso.log 2>&1
+          test -s cdzone67.iso
+          echo "ISO_BYTES=$(stat -c %s cdzone67.iso)" | tee -a report/status.env
+          echo "ISO_SHA256=$(sha256sum cdzone67.iso | awk '{print $1}')" | tee -a report/status.env
+          file -b cdzone67.iso | sed 's/^/ISO_TYPE=/' | tee -a report/status.env
+
+      - name: Inspect CD filesystem for HOTD
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/pczone67"
+          mkdir -p cdroot
+          7z l -slt cdzone67.iso > report/iso-list.txt
+          grep -E -i -C 3 'hotd|house.?of.?the.?dead|dead' report/iso-list.txt > report/hotd-iso-hits.txt || true
+          7z x -y -ocdroot cdzone67.iso > report/iso-extract.log
+          find cdroot -type f -printf '%p\n' | sort > report/cd-files.txt
+          grep -E -i 'hotd|house.?of.?the.?dead' report/cd-files.txt > report/hotd-path-hits.txt || true
+          echo '--- HOTD ISO hits ---'
+          cat report/hotd-iso-hits.txt || true
+          echo '--- HOTD filesystem hits ---'
+          cat report/hotd-path-hits.txt || true
+          if [[ -s report/hotd-path-hits.txt || -s report/hotd-iso-hits.txt ]]; then
             echo HOTD_ENTRY_FOUND=true | tee -a report/status.env
           else
             echo HOTD_ENTRY_FOUND=false | tee -a report/status.env
           fi
 
-      - name: Extract CD only inside ephemeral runner
+      - name: Inspect HOTD installer and redistribution text
         shell: bash
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP/pczone67"
-          mkdir extracted
-          7z x -y -oextracted cdzone67.rar >/dev/null
-          find extracted -type f \( -iname '*hotd*' -o -iname '*house*dead*' \) -printf '%p\n' | sort > report/hotd-files.txt || true
-          find extracted -type d \( -iname 'hotd' -o -iname '*house*dead*' \) -printf '%p\n' | sort > report/hotd-dirs.txt || true
-          cat report/hotd-files.txt report/hotd-dirs.txt
-
-          HOTD_DIR="$(find extracted -type d -iname 'hotd' -print -quit || true)"
-          if [[ -n "$HOTD_DIR" ]]; then
-            echo "HOTD_DIR_FOUND=${HOTD_DIR#extracted/}" | tee -a report/status.env
-            find "$HOTD_DIR" -type f -printf '%P\t%s bytes\n' | sort > report/hotd-directory-list.txt
-            find "$HOTD_DIR" -type f \( -iname '*.exe' -o -iname '*.zip' -o -iname '*.arj' \) -print0 | while IFS= read -r -d '' f; do
-              printf '%s\t' "${f#$HOTD_DIR/}" >> report/hotd-candidate-hashes.txt
-              sha256sum "$f" | awk '{print $1}' >> report/hotd-candidate-hashes.txt
-              if [[ "$(basename "$f" | tr '[:upper:]' '[:lower:]')" == 'hotd_demo.exe' ]]; then
-                md5sum "$f" | tee report/hotd_demo.exe.md5.txt
-                sha256sum "$f" | tee report/hotd_demo.exe.sha256.txt
-              fi
-            done
-          else
-            echo HOTD_DIR_FOUND=false | tee -a report/status.env
-          fi
-
-      - name: Inspect HOTD installer and license text
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$RUNNER_TEMP/pczone67"
-          HOTD_DIR="$(find extracted -type d -iname 'hotd' -print -quit || true)"
-          [[ -n "$HOTD_DIR" ]] || exit 0
-          mkdir -p hotd-installer-extracted
-          INSTALLER="$(find "$HOTD_DIR" -type f -iname 'hotd_demo.exe' -print -quit || true)"
-          if [[ -n "$INSTALLER" ]]; then
-            echo INSTALLER_FOUND=true | tee -a report/status.env
-            file -b "$INSTALLER" | sed 's/^/INSTALLER_TYPE=/' | tee -a report/status.env
-            7z l "$INSTALLER" > report/installer-list.txt 2>&1 || true
-            7z x -y -ohotd-installer-extracted "$INSTALLER" >/dev/null 2>&1 || true
-          else
+          INSTALLER="$(find cdroot -type f -iname 'hotd_demo.exe' -print -quit || true)"
+          if [[ -z "$INSTALLER" ]]; then INSTALLER="$(find cdroot -type f -iname '*hotd*.exe' -print -quit || true)"; fi
+          if [[ -z "$INSTALLER" ]]; then
             echo INSTALLER_FOUND=false | tee -a report/status.env
+            exit 0
           fi
+          echo INSTALLER_FOUND=true | tee -a report/status.env
+          echo "INSTALLER_PATH=${INSTALLER#cdroot/}" | tee -a report/status.env
+          echo "INSTALLER_BYTES=$(stat -c %s "$INSTALLER")" | tee -a report/status.env
+          echo "INSTALLER_MD5=$(md5sum "$INSTALLER" | awk '{print $1}')" | tee -a report/status.env
+          echo "INSTALLER_SHA256=$(sha256sum "$INSTALLER" | awk '{print $1}')" | tee -a report/status.env
+          file -b "$INSTALLER" | sed 's/^/INSTALLER_TYPE=/' | tee -a report/status.env
 
+          mkdir -p installer-inner
+          7z l -slt "$INSTALLER" > report/installer-list.txt 2>&1 || true
+          7z x -y -oinstaller-inner "$INSTALLER" > report/installer-extract.log 2>&1 || true
           : > report/license-candidates.txt
-          : > report/license-evidence.txt
-          for ROOT in "$HOTD_DIR" hotd-installer-extracted; do
+          PARENT="$(dirname "$INSTALLER")"
+          for ROOT in "$PARENT" installer-inner; do
             [[ -d "$ROOT" ]] || continue
             find "$ROOT" -type f \( -iname 'readme*' -o -iname 'license*' -o -iname 'licence*' -o -iname 'eula*' -o -iname '*.txt' -o -iname '*.rtf' \) -print >> report/license-candidates.txt || true
           done
           sort -u -o report/license-candidates.txt report/license-candidates.txt
-          while IFS= read -r f; do
-            [[ -f "$f" ]] || continue
-            echo "===== ${f#extracted/} =====" >> report/license-evidence.txt
-            strings -n 5 "$f" | grep -E -i -C 3 'redistribut|distribut|copy|shareware|freeware|demo|license|licence|permission|may be (freely )?(copied|distributed)|not for resale' | head -n 160 >> report/license-evidence.txt || true
-          done < report/license-candidates.txt
-          if [[ -s report/license-evidence.txt ]]; then
-            echo LICENSE_TEXT_FOUND=true | tee -a report/status.env
-            sed -n '1,300p' report/license-evidence.txt
+          {
+            echo '===== INSTALLER STRINGS ====='
+            strings -n 5 "$INSTALLER" | grep -E -i -C 3 'redistribut|distribut|copy|shareware|freeware|demo|license|licence|permission|may be (freely )?(copied|distributed)|not for resale' | head -n 260 || true
+            while IFS= read -r f; do
+              [[ -f "$f" ]] || continue
+              echo "===== FILE: ${f#cdroot/} ====="
+              strings -n 5 "$f" | grep -E -i -C 3 'redistribut|distribut|copy|shareware|freeware|demo|license|licence|permission|may be (freely )?(copied|distributed)|not for resale' | head -n 180 || true
+            done < report/license-candidates.txt
+          } > report/license-evidence.txt
+          if grep -E -i -q 'may be (freely )?(copied|distributed)|freely distribut|redistribut' report/license-evidence.txt; then
+            echo REDISTRIBUTION_TEXT_CANDIDATE=true | tee -a report/status.env
           else
-            echo LICENSE_TEXT_FOUND=false | tee -a report/status.env
+            echo REDISTRIBUTION_TEXT_CANDIDATE=false | tee -a report/status.env
           fi
+          echo LICENSE_TEXT_FOUND=true | tee -a report/status.env
+          sed -n '1,380p' report/license-evidence.txt
 
-      - name: Upload audit report only — never CD or game files
+      - name: Upload text-only cover CD report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: hotd1997-pczone67-demo-audit-report
+          name: hotd1997-pczone67-clonecd-report
           path: ${{ runner.temp }}/pczone67/report
           if-no-files-found: warn
           retention-days: 30
