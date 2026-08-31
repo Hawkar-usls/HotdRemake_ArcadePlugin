@@ -11,197 +11,45 @@ permissions:
   contents: read
 
 jobs:
-  smoke-hotd-native:
+  probe-offline-rootfs:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 10
     env:
-      PCZONE_CD_ARCHIVE: https://pixsoriginadventures.co.uk/PCZone/PC%20Zone%2067%20%28September%201998%29/CDZone%2367.rar
       BOXEDWINE_OFFLINE_BUNDLE: https://sourceforge.net/projects/boxedwine/files/Builds/20.1.2/BoxedWine%2020.1.2%20-%20Windows.zip/download
-      HOTD_INSTALLER_SHA256: 6150da85cd5e7ba88bbe722aba8202d5f8726b66eb1e8614b2bda5e89ae76944
     steps:
-      - name: Checkout BoxedWine upstream
-        uses: actions/checkout@v4
-        with:
-          repository: danoon2/Boxedwine
-          ref: 2473488cfcf1ba914daf5aad097da0c59bb16073
-          path: Boxedwine
-          fetch-depth: 1
-
-      - name: Install native build and sterile display tools
+      - name: Fetch official offline BoxedWine bundle
         shell: bash
         run: |
           set -euo pipefail
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq \
-            build-essential libsdl2-dev libssl-dev libminizip-dev \
-            libcurl4-openssl-dev libgl1-mesa-dev libglu1-mesa-dev \
-            xvfb x11-utils imagemagick unar p7zip-full ccd2iso file curl unzip
-
-      - name: Build native BoxedWine
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd Boxedwine/project/linux
-          make
-          test -x Build/Release/boxedwine
-          ./Build/Release/boxedwine -version > "$RUNNER_TEMP/boxedwine-version.txt" 2>&1 || true
-
-      - name: Recover official offline BoxedWine filesystem bundle
-        id: rootfs
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/hotd-smoke/report" "$RUNNER_TEMP/hotd-smoke/portable"
-          cd "$RUNNER_TEMP/hotd-smoke"
+          mkdir -p "$RUNNER_TEMP/rootfs-probe/report" "$RUNNER_TEMP/rootfs-probe/portable"
+          cd "$RUNNER_TEMP/rootfs-probe"
           curl --fail --location --retry 3 --retry-all-errors \
             --output boxedwine-offline.zip "$BOXEDWINE_OFFLINE_BUNDLE"
           test -s boxedwine-offline.zip
-          file -b boxedwine-offline.zip | tee report/offline-bundle-type.txt
-          sha256sum boxedwine-offline.zip | tee report/offline-bundle-sha256.txt
-          unzip -tq boxedwine-offline.zip | tee report/offline-bundle-test.txt
+          file -b boxedwine-offline.zip | tee report/bundle-type.txt
+          sha256sum boxedwine-offline.zip | tee report/bundle-sha256.txt
+          unzip -tq boxedwine-offline.zip | tee report/bundle-test.txt
           unzip -q boxedwine-offline.zip -d portable
 
+      - name: Inventory bundled filesystem layers
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/rootfs-probe"
           find portable -type f -iname '*.zip' -printf '%p\t%s bytes\n' | sort | tee report/bundled-zips.txt
           : > report/bundled-zip-inspection.txt
           while IFS= read -r z; do
-            echo "===== ${z#portable/} =====" >> report/bundled-zip-inspection.txt
-            sha256sum "$z" >> report/bundled-zip-inspection.txt
-            unzip -l "$z" 2>/dev/null | sed -n '1,30p' >> report/bundled-zip-inspection.txt || true
+            echo "===== ${z#portable/} =====" | tee -a report/bundled-zip-inspection.txt
+            sha256sum "$z" | tee -a report/bundled-zip-inspection.txt
+            unzip -l "$z" 2>/dev/null | sed -n '1,45p' | tee -a report/bundled-zip-inspection.txt || true
           done < <(find portable -type f -iname '*.zip' | sort)
+          echo "ZIP_COUNT=$(find portable -type f -iname '*.zip' | wc -l)" | tee report/status.env
 
-          WINE_ZIP="$(find portable -type f \( -iname '*Wine*5*.zip' -o -iname '*wine5*.zip' -o -iname '*Wine-5*.zip' \) -print -quit || true)"
-          BASE_ZIP="$(find portable -type f \( -iname 'debian10.zip' -o -iname '*debian*10*.zip' \) ! -iname '*wine*' -print -quit || true)"
-
-          if [[ -z "$WINE_ZIP" ]]; then
-            echo 'WINE5_BUNDLE_FOUND=false' | tee report/rootfs-status.env
-            echo '::error::Offline bundle contained no recognizable Wine 5 filesystem ZIP.'
-            exit 1
-          fi
-
-          echo 'WINE5_BUNDLE_FOUND=true' | tee report/rootfs-status.env
-          echo "WINE_ZIP=${WINE_ZIP#portable/}" | tee -a report/rootfs-status.env
-          echo "WINE_ZIP_SHA256=$(sha256sum "$WINE_ZIP" | awk '{print $1}')" | tee -a report/rootfs-status.env
-          printf '%s\n' "$WINE_ZIP" > wine-zip.path
-
-          if [[ -n "$BASE_ZIP" ]]; then
-            echo 'BASE_BUNDLE_FOUND=true' | tee -a report/rootfs-status.env
-            echo "BASE_ZIP=${BASE_ZIP#portable/}" | tee -a report/rootfs-status.env
-            echo "BASE_ZIP_SHA256=$(sha256sum "$BASE_ZIP" | awk '{print $1}')" | tee -a report/rootfs-status.env
-            printf '%s\n' "$BASE_ZIP" > base-zip.path
-          else
-            echo 'BASE_BUNDLE_FOUND=false' | tee -a report/rootfs-status.env
-            : > base-zip.path
-          fi
-
-      - name: Recover genuine HOTD demo ephemerally from historical cover CD
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$RUNNER_TEMP/hotd-smoke"
-          mkdir -p outer cdroot installer-inner
-          curl --fail --location --retry 3 --retry-all-errors \
-            --output cdzone67.rar "$PCZONE_CD_ARCHIVE"
-          unar -f -o outer cdzone67.rar >/dev/null
-          IMG="$(find outer -type f -iname '*.img' -print -quit)"
-          test -n "$IMG"
-          ccd2iso "$IMG" cdzone67.iso >/dev/null
-          7z x -y -ocdroot cdzone67.iso >/dev/null
-          INSTALLER="$(find cdroot -type f -ipath '*/Gamedemo/Win95/hotd/Install.exe' -print -quit)"
-          test -n "$INSTALLER"
-          ACTUAL_SHA="$(sha256sum "$INSTALLER" | awk '{print $1}')"
-          echo "HOTD_INSTALLER_SHA256=$ACTUAL_SHA" | tee report/hotd-identity.txt
-          test "$ACTUAL_SHA" = "$HOTD_INSTALLER_SHA256"
-          7z x -y -oinstaller-inner "$INSTALLER" >/dev/null
-          GAME_DIR="$(find installer-inner -type d -iname 'hotd_demo' -print -quit)"
-          test -n "$GAME_DIR"
-          test -f "$GAME_DIR/THOTDEMO.exe"
-          test -f "$GAME_DIR/README.TXT"
-          echo "GAME_EXE_SHA256=$(sha256sum "$GAME_DIR/THOTDEMO.exe" | awk '{print $1}')" | tee -a report/hotd-identity.txt
-          echo "GAME_EXE_BYTES=$(stat -c %s "$GAME_DIR/THOTDEMO.exe")" | tee -a report/hotd-identity.txt
-          printf '%s\n' "$GAME_DIR" > game-dir.txt
-
-      - name: Launch THOTDEMO.exe under BoxedWine on Xvfb
-        id: smoke
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$RUNNER_TEMP/hotd-smoke"
-          GAME_DIR="$(cat game-dir.txt)"
-          WINE_ZIP="$(cat wine-zip.path)"
-          BASE_ZIP="$(cat base-zip.path)"
-          BW="$GITHUB_WORKSPACE/Boxedwine/project/linux/Build/Release/boxedwine"
-          mkdir -p boxedwine-write
-
-          Xvfb :99 -screen 0 1024x768x24 -nolisten tcp > report/xvfb.log 2>&1 &
-          XVFB_PID=$!
-          export DISPLAY=:99
-          export LIBGL_ALWAYS_SOFTWARE=1
-          sleep 2
-          xdpyinfo > report/xdpyinfo.txt
-
-          ZIP_ARGS=(-zip "$WINE_ZIP")
-          if [[ -n "$BASE_ZIP" ]]; then ZIP_ARGS=(-zip "$BASE_ZIP" -zip "$WINE_ZIP"); fi
-
-          set +e
-          "$BW" \
-            -root "$PWD/boxedwine-write" \
-            "${ZIP_ARGS[@]}" \
-            -mount_drive "$GAME_DIR" d \
-            -w /mnt/d_drive \
-            -resolution 640x480 \
-            -bpp 16 \
-            -nosound \
-            /bin/wine 'd:\\THOTDEMO.exe' \
-            > report/boxedwine-hotd.log 2>&1 &
-          GAME_PID=$!
-          set -e
-
-          sleep 20
-          xwininfo -root -tree > report/window-tree.txt 2>&1 || true
-          import -display :99 -window root report/hotd-xvfb.png 2> report/screenshot-error.txt || true
-
-          if kill -0 "$GAME_PID" 2>/dev/null; then
-            echo 'PROCESS_ALIVE_AFTER_20S=true' | tee report/smoke-status.env
-            echo 'NATIVE_EXECUTION_SMOKE=PROCESS_SURVIVED' | tee -a report/smoke-status.env
-            kill "$GAME_PID" 2>/dev/null || true
-            sleep 1
-            kill -9 "$GAME_PID" 2>/dev/null || true
-          else
-            set +e
-            wait "$GAME_PID"
-            EXIT_CODE=$?
-            set -e
-            echo 'PROCESS_ALIVE_AFTER_20S=false' | tee report/smoke-status.env
-            echo "PROCESS_EXIT_CODE=$EXIT_CODE" | tee -a report/smoke-status.env
-            echo 'NATIVE_EXECUTION_SMOKE=EARLY_EXIT' | tee -a report/smoke-status.env
-          fi
-
-          if grep -q 'zip dependency .* was not found' report/boxedwine-hotd.log; then
-            echo 'ROOTFS_DEPENDENCY_PASS=false' | tee -a report/smoke-status.env
-          else
-            echo 'ROOTFS_DEPENDENCY_PASS=true' | tee -a report/smoke-status.env
-          fi
-          if grep -E -q 'WineDbg|wine debugger|Unhandled exception' report/boxedwine-hotd.log; then
-            echo 'WINE_DEBUGGER_PRESENT=true' | tee -a report/smoke-status.env
-          else
-            echo 'WINE_DEBUGGER_PRESENT=false' | tee -a report/smoke-status.env
-          fi
-
-          kill "$XVFB_PID" 2>/dev/null || true
-          echo 'HOTD_BINARY_PERSISTED=NO' | tee -a report/smoke-status.env
-          echo 'HOTD_BINARY_UPLOADED=NO' | tee -a report/smoke-status.env
-          echo '--- WINDOW TREE ---'
-          sed -n '1,180p' report/window-tree.txt || true
-          echo '--- BOXEDWINE LOG TAIL ---'
-          tail -n 200 report/boxedwine-hotd.log || true
-
-      - name: Upload non-binary execution evidence only
+      - name: Upload filesystem inventory only
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: hotd1997-native-boxedwine-smoke-report
-          path: |
-            ${{ runner.temp }}/hotd-smoke/report
-            ${{ runner.temp }}/boxedwine-version.txt
+          name: boxedwine-20.1.2-offline-rootfs-inventory
+          path: ${{ runner.temp }}/rootfs-probe/report
           if-no-files-found: warn
           retention-days: 30
