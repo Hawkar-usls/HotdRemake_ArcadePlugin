@@ -1,6 +1,6 @@
 {
   "project": "HOTD1997_PC_DEMO_BROWSER_PROOF",
-  "status": "SOURCE_FOUND_REDISTRIBUTION_UNVERIFIED",
+  "status": "SOURCE_FOUND_RUNTIME_BUILD_PASS_REDISTRIBUTION_UNVERIFIED",
   "target": {
     "title": "The House of the Dead",
     "publisher": "SEGA",
@@ -15,7 +15,8 @@
       "HOTDDEMO.A03"
     ],
     "archive_date": "1998-06-28",
-    "requirements": "Pentium 133, 16 MB RAM, Windows 95, DirectX, 3D acceleration"
+    "requirements": "Pentium 133, 16 MB RAM, Windows 95, DirectX, 3D acceleration",
+    "known_cover_cd_installer_path": "\\hotd\\hotd_demo.exe"
   },
   "current_mirror_candidate": {
     "provider": "FilePlanet / Download.it",
@@ -24,19 +25,46 @@
     "developer": "SEGA",
     "size": "15.4 MB",
     "md5": "adec3d6ca6829a024350ef1fdb890d04",
+    "probe_result": "HTTP_403_HTML_ANTI_BOT",
+    "package_identity_verified": false,
     "binary_in_repository": false,
     "redistribution_permission_verified": false
   },
+  "cover_cd_probe": {
+    "provider": "PC Zone #67 archival cover media",
+    "archive_bytes": 635457476,
+    "archive_sha256": "1a8695d904886e028b4e14aa59b85934c1d867ed03d2f3a18c9d202691efa1ba",
+    "archive_type": "RAR v4",
+    "container": "CloneCD",
+    "entries": [
+      "CDZone#67.ccd",
+      "CDZone#67.cue",
+      "CDZone#67.img",
+      "CDZone#67.sub"
+    ],
+    "first_extract_result": "7ZIP_SEGFAULT_EXIT_139",
+    "successor_probe": "UNAR_THEN_CCD2ISO_THEN_ISO_SCAN",
+    "binary_persisted": false,
+    "binary_uploaded": false
+  },
   "historical_distribution_evidence": [
     "Apaja PC demo archive: HOTDDEMO 4-part SEGA demo",
-    "PC Zone #67 cover media: The House of the Dead [PC] demo/shareware",
-    "Generation 4 #114 cover media: The House of the Dead [PC] demo/shareware"
+    "Computer Player cover media catalog: \\hotd\\hotd_demo.exe",
+    "PC Zone archival cover media under machine inspection"
   ],
   "runtime": {
     "name": "BoxedWine",
     "upstream": "https://github.com/danoon2/Boxedwine",
+    "upstream_sha": "2473488cfcf1ba914daf5aad097da0c59bb16073",
     "license": "GPL-2.0",
     "web_support": true,
+    "wasm_runtime_build_pass": true,
+    "build_run_id": 33447803130,
+    "build_job_id": 99670699269,
+    "artifact_id": 9778739317,
+    "artifact_name": "hotd1997-boxedwine-web-runtime",
+    "artifact_sha256": "d92e1dc6d891cdeaa34f9dd9bc2cf4599ac9be28fc795c79b8ecc80a3d9f3029",
+    "linker_compat_patch": "final link CC/emcc -> CXX/em++",
     "candidate_program": "HOTD demo executable after package inspection",
     "verified_with_hotd": false
   },
@@ -44,6 +72,7 @@
     "PACKAGE_IDENTITY_PASS": false,
     "LICENSE_README_PASS": false,
     "BOXEDWINE_NATIVE_PASS": false,
+    "BOXEDWINE_RUNTIME_BUILD_PASS": true,
     "BOXEDWINE_WASM_PASS": false,
     "PAGES_PASS": false
   },
