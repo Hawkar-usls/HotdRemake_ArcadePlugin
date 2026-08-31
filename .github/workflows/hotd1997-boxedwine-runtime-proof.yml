@@ -82,6 +82,7 @@ jobs:
     env:
       PCZONE_CD_ARCHIVE: https://pixsoriginadventures.co.uk/PCZone/PC%20Zone%2067%20%28September%201998%29/CDZone%2367.rar
       BOXEDWINE_FS: https://sourceforge.net/projects/boxedwine/files/FileSystems/Full/v5/Debian10-Wine-5.0.zip/download
+      BOXEDWINE_BASE_FS: https://sourceforge.net/projects/boxedwine/files/FileSystems/Split/v5/debian10.zip/download
       HOTD_INSTALLER_SHA256: 6150da85cd5e7ba88bbe722aba8202d5f8726b66eb1e8614b2bda5e89ae76944
     steps:
       - name: Checkout BoxedWine upstream
@@ -111,7 +112,7 @@ jobs:
           test -x Build/Release/boxedwine
           ./Build/Release/boxedwine -version > "$RUNNER_TEMP/boxedwine-version.txt" 2>&1 || true
 
-      - name: Fetch official BoxedWine Wine filesystem
+      - name: Fetch official BoxedWine filesystem layers
         shell: bash
         run: |
           set -euo pipefail
@@ -119,9 +120,16 @@ jobs:
           cd "$RUNNER_TEMP/hotd-smoke"
           curl --fail --location --retry 3 --retry-all-errors \
             --output Debian10-Wine-5.0.zip "$BOXEDWINE_FS"
+          curl --fail --location --retry 3 --retry-all-errors \
+            --output debian10.zip "$BOXEDWINE_BASE_FS"
           test -s Debian10-Wine-5.0.zip
-          file -b Debian10-Wine-5.0.zip | tee report/rootfs-type.txt
-          sha256sum Debian10-Wine-5.0.zip | tee report/rootfs-sha256.txt
+          test -s debian10.zip
+          file -b Debian10-Wine-5.0.zip | tee report/rootfs-wine-type.txt
+          sha256sum Debian10-Wine-5.0.zip | tee report/rootfs-wine-sha256.txt
+          file -b debian10.zip | tee report/rootfs-base-type.txt
+          sha256sum debian10.zip | tee report/rootfs-base-sha256.txt
+          unzip -tq Debian10-Wine-5.0.zip | tee report/rootfs-wine-test.txt
+          unzip -tq debian10.zip | tee report/rootfs-base-test.txt
 
       - name: Recover genuine HOTD demo ephemerally from historical cover CD
         shell: bash
@@ -170,6 +178,7 @@ jobs:
           set +e
           "$BW" \
             -root "$PWD/boxedwine-write" \
+            -zip "$PWD/debian10.zip" \
             -zip "$PWD/Debian10-Wine-5.0.zip" \
             -mount_drive "$GAME_DIR" d \
             -w /mnt/d_drive \
