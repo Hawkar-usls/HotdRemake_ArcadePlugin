@@ -17,88 +17,85 @@ jobs:
     env:
       CD_ARCHIVE: https://pixsoriginadventures.co.uk/PCZone/PC%20Zone%2067%20%28September%201998%29/CDZone%2367.rar
     steps:
-      - name: Install robust archive tools
+      - name: Install CloneCD and archive tools
         shell: bash
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y -qq unar p7zip-full file bchunk cabextract
+          sudo apt-get install -y -qq unar p7zip-full ccd2iso file cabextract
 
-      - name: Fetch and unpack outer RAR ephemerally
+      - name: Fetch and unpack historical cover CD ephemerally
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/pczone67v2/report" "$RUNNER_TEMP/pczone67v2/outer"
           cd "$RUNNER_TEMP/pczone67v2"
           curl --fail --location --retry 3 --retry-all-errors --output cdzone67.rar "$CD_ARCHIVE"
-          echo "OUTER_SHA256=$(sha256sum cdzone67.rar | awk '{print $1}')" | tee report/status.env
-          echo "OUTER_BYTES=$(stat -c %s cdzone67.rar)" | tee -a report/status.env
+          {
+            echo "OUTER_BYTES=$(stat -c %s cdzone67.rar)"
+            echo "OUTER_SHA256=$(sha256sum cdzone67.rar | awk '{print $1}')"
+            echo "OUTER_TYPE=$(file -b cdzone67.rar)"
+            echo 'BINARY_PERSISTED=NO'
+            echo 'BINARY_UPLOADED=NO'
+          } | tee report/status.env
           unar -f -o outer cdzone67.rar > report/unar.log 2>&1
           echo OUTER_EXTRACT_PASS=true | tee -a report/status.env
-          find outer -maxdepth 3 -type f -printf '%p\t%s\n' | sort > report/outer-files.txt
-          while IFS= read -r f; do file -b "$f" | sed "s#^#${f#outer/}\t#"; done < <(find outer -type f | head -n 200) > report/outer-types.txt
-          sed -n '1,200p' report/outer-files.txt
+          find outer -maxdepth 2 -type f -printf '%P\t%s bytes\n' | sort | tee report/outer-files.txt
 
-      - name: Expand CD image or nested containers
+      - name: Convert CloneCD IMG to ISO
         shell: bash
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP/pczone67v2"
-          mkdir -p media
-          shopt -s nullglob nocaseglob
+          IMG="$(find outer -type f -iname '*.img' -print -quit)"
+          CCD="$(find outer -type f -iname '*.ccd' -print -quit || true)"
+          CUE="$(find outer -type f -iname '*.cue' -print -quit || true)"
+          test -n "$IMG"
+          echo "CLONECD_IMG=${IMG#outer/}" | tee -a report/status.env
+          [[ -n "$CCD" ]] && echo "CLONECD_CCD=${CCD#outer/}" | tee -a report/status.env
+          [[ -n "$CUE" ]] && echo "CLONECD_CUE=${CUE#outer/}" | tee -a report/status.env
+          ccd2iso "$IMG" cdzone67.iso > report/ccd2iso.log 2>&1
+          test -s cdzone67.iso
+          echo "ISO_BYTES=$(stat -c %s cdzone67.iso)" | tee -a report/status.env
+          echo "ISO_SHA256=$(sha256sum cdzone67.iso | awk '{print $1}')" | tee -a report/status.env
+          file -b cdzone67.iso | sed 's/^/ISO_TYPE=/' | tee -a report/status.env
 
-          # If the RAR contains an ISO, unpack its filesystem.
-          ISO="$(find outer -type f \( -iname '*.iso' -o -iname '*.img' \) -print -quit || true)"
-          if [[ -n "$ISO" ]]; then
-            echo "MEDIA_IMAGE=${ISO#outer/}" | tee -a report/status.env
-            7z l -slt "$ISO" > report/media-list.txt 2>&1 || true
-            7z x -y -omedia "$ISO" > report/media-extract.log 2>&1 || true
-          fi
-
-          # Convert BIN/CUE to ISO when present.
-          if [[ -z "$ISO" ]]; then
-            CUE="$(find outer -type f -iname '*.cue' -print -quit || true)"
-            BIN="$(find outer -type f -iname '*.bin' -print -quit || true)"
-            if [[ -n "$CUE" && -n "$BIN" ]]; then
-              echo "MEDIA_BIN=${BIN#outer/}" | tee -a report/status.env
-              echo "MEDIA_CUE=${CUE#outer/}" | tee -a report/status.env
-              bchunk "$BIN" "$CUE" media/cd > report/bchunk.log 2>&1 || true
-              CONVERTED="$(find media -type f -iname '*.iso' -print -quit || true)"
-              if [[ -n "$CONVERTED" ]]; then
-                mkdir -p media-fs
-                7z l -slt "$CONVERTED" > report/media-list.txt 2>&1 || true
-                7z x -y -omedia-fs "$CONVERTED" > report/media-extract.log 2>&1 || true
-              fi
-            fi
-          fi
-
-          # If the RAR already contained the CD filesystem, outer itself is searchable.
-          find outer media media-fs -type f 2>/dev/null | sort > report/all-visible-files.txt || true
-          grep -E -i '(^|/)(hotd|house.?of.?the.?dead)|hotd_demo\.exe' report/all-visible-files.txt > report/hotd-path-hits.txt || true
-          if [[ -s report/media-list.txt ]]; then
-            grep -E -i -C 3 'hotd|house.?of.?the.?dead|dead' report/media-list.txt > report/hotd-media-list-hits.txt || true
-          fi
-          echo '--- HOTD path hits ---'
+      - name: Inspect and extract CD filesystem
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/pczone67v2"
+          mkdir -p cdroot
+          7z l -slt cdzone67.iso > report/iso-list.txt
+          grep -E -i -C 3 'hotd|house.?of.?the.?dead|dead' report/iso-list.txt > report/hotd-iso-hits.txt || true
+          echo '--- HOTD ISO listing hits ---'
+          cat report/hotd-iso-hits.txt || true
+          7z x -y -ocdroot cdzone67.iso > report/iso-extract.log
+          find cdroot -type f -printf '%p\n' | sort > report/cd-files.txt
+          grep -E -i 'hotd|house.?of.?the.?dead' report/cd-files.txt > report/hotd-path-hits.txt || true
+          echo '--- HOTD filesystem hits ---'
           cat report/hotd-path-hits.txt || true
-          echo '--- HOTD image-list hits ---'
-          cat report/hotd-media-list-hits.txt 2>/dev/null || true
+          if [[ -s report/hotd-path-hits.txt || -s report/hotd-iso-hits.txt ]]; then
+            echo HOTD_ENTRY_FOUND=true | tee -a report/status.env
+          else
+            echo HOTD_ENTRY_FOUND=false | tee -a report/status.env
+          fi
 
-      - name: Inspect HOTD demo installer and nearby text
+      - name: Inspect HOTD demo installer and license evidence
         shell: bash
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP/pczone67v2"
-          INSTALLER="$(find outer media media-fs -type f -iname 'hotd_demo.exe' -print -quit 2>/dev/null || true)"
+          INSTALLER="$(find cdroot -type f -iname 'hotd_demo.exe' -print -quit || true)"
           if [[ -z "$INSTALLER" ]]; then
-            INSTALLER="$(find outer media media-fs -type f -iname '*hotd*.exe' -print -quit 2>/dev/null || true)"
+            INSTALLER="$(find cdroot -type f -iname '*hotd*.exe' -print -quit || true)"
           fi
           if [[ -z "$INSTALLER" ]]; then
             echo INSTALLER_FOUND=false | tee -a report/status.env
             exit 0
           fi
-
           echo INSTALLER_FOUND=true | tee -a report/status.env
-          echo "INSTALLER_PATH=$INSTALLER" | tee -a report/status.env
+          echo "INSTALLER_PATH=${INSTALLER#cdroot/}" | tee -a report/status.env
           echo "INSTALLER_BYTES=$(stat -c %s "$INSTALLER")" | tee -a report/status.env
           echo "INSTALLER_MD5=$(md5sum "$INSTALLER" | awk '{print $1}')" | tee -a report/status.env
           echo "INSTALLER_SHA256=$(sha256sum "$INSTALLER" | awk '{print $1}')" | tee -a report/status.env
@@ -117,39 +114,29 @@ jobs:
           done
           sort -u -o report/license-candidates.txt report/license-candidates.txt
 
-          # Include installer strings because old Win95 installers often embed license copy.
           {
             echo '===== INSTALLER STRINGS ====='
-            strings -n 5 "$INSTALLER" | grep -E -i -C 3 'redistribut|distribut|copy|shareware|freeware|demo|license|licence|permission|may be (freely )?(copied|distributed)|not for resale' | head -n 240 || true
+            strings -n 5 "$INSTALLER" | grep -E -i -C 3 'redistribut|distribut|copy|shareware|freeware|demo|license|licence|permission|may be (freely )?(copied|distributed)|not for resale' | head -n 260 || true
             while IFS= read -r f; do
               [[ -f "$f" ]] || continue
-              echo "===== FILE: $f ====="
-              strings -n 5 "$f" | grep -E -i -C 3 'redistribut|distribut|copy|shareware|freeware|demo|license|licence|permission|may be (freely )?(copied|distributed)|not for resale' | head -n 160 || true
+              echo "===== FILE: ${f#cdroot/} ====="
+              strings -n 5 "$f" | grep -E -i -C 3 'redistribut|distribut|copy|shareware|freeware|demo|license|licence|permission|may be (freely )?(copied|distributed)|not for resale' | head -n 180 || true
             done < report/license-candidates.txt
           } > report/license-evidence.txt
 
-          if [[ -s report/license-evidence.txt ]]; then
-            echo LICENSE_TEXT_FOUND=true | tee -a report/status.env
-            sed -n '1,360p' report/license-evidence.txt
+          if grep -E -i -q 'may be (freely )?(copied|distributed)|freely distribut|redistribut' report/license-evidence.txt; then
+            echo REDISTRIBUTION_TEXT_CANDIDATE=true | tee -a report/status.env
           else
-            echo LICENSE_TEXT_FOUND=false | tee -a report/status.env
+            echo REDISTRIBUTION_TEXT_CANDIDATE=false | tee -a report/status.env
           fi
+          echo LICENSE_TEXT_FOUND=true | tee -a report/status.env
+          sed -n '1,380p' report/license-evidence.txt
 
-      - name: Upload text report only
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$RUNNER_TEMP/pczone67v2" 2>/dev/null || exit 0
-          echo BINARY_PERSISTED=NO >> report/status.env
-          echo BINARY_UPLOADED=NO >> report/status.env
-          find report -type f -maxdepth 1 -printf '%f\n' | sort
-
-      - name: Publish audit report
+      - name: Upload text-only audit report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: hotd1997-pczone67-container-report
+          name: hotd1997-pczone67-clonecd-report
           path: ${{ runner.temp }}/pczone67v2/report
           if-no-files-found: warn
           retention-days: 30
