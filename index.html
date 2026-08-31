@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <meta name="theme-color" content="#05070a">
+  <meta name="description" content="Playable browser arcade rail-shooter build for the HotdRemake Arcade Plugin project.">
+  <title>HOTD Arcade · Browser Build v2</title>
+  <link rel="stylesheet" href="./styles.css?v=20260831-d2e89a-v2">
+</head>
+<body>
+  <main class="page">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">HOTD REMAKE · ARCADE PLUGIN · WEB BUILD</p>
+        <h1>ARCADE <span>OUTBREAK</span></h1>
+        <p style="margin:.35rem 0 0;font:700 11px/1.2 monospace;opacity:.55">LIVE BUILD: 2026-08-31 · WEB-v2</p>
+      </div>
+      <a class="repo" href="https://github.com/Hawkar-usls/HotdRemake_ArcadePlugin" target="_blank" rel="noreferrer">SOURCE ↗</a>
+    </header>
+
+    <section class="cabinet" aria-label="Browser arcade game">
+      <div class="screen-wrap">
+        <canvas id="game" width="1280" height="720" aria-label="Arcade rail shooter game canvas"></canvas>
+
+        <div id="hud" class="hud" aria-hidden="true">
+          <div class="hud-block left">
+            <span class="label">SCORE</span>
+            <strong id="score">0000000</strong>
+            <span class="mini">HIGH <b id="highScore">0000000</b></span>
+          </div>
+          <div class="hud-center">
+            <span id="waveLabel">WAVE 1</span>
+            <span id="comboLabel"></span>
+          </div>
+          <div class="hud-block right">
+            <span class="label">LIFE</span>
+            <strong id="life">♥ ♥ ♥ ♥ ♥</strong>
+            <span class="mini">AMMO <b id="ammo">● ● ● ● ● ●</b></span>
+          </div>
+        </div>
+
+        <div id="overlay" class="overlay">
+          <div class="overlay-card">
+            <p class="kicker">PLAYABLE GITHUB PAGES BUILD</p>
+            <h2 id="overlayTitle">INSERT COIN</h2>
+            <p id="overlayText">Press <kbd>5</kbd> to add a credit, then <kbd>1</kbd> to start.</p>
+            <button id="startButton" type="button">INSERT COIN & START</button>
+            <div class="controls">
+              <span><b>MOUSE / TOUCH</b> AIM</span>
+              <span><b>CLICK / TAP</b> FIRE</span>
+              <span><b>R</b> RELOAD</span>
+              <span><b>5</b> COIN</span>
+              <span><b>1</b> START</span>
+            </div>
+          </div>
+        </div>
+
+        <div id="damageFlash" class="damage-flash"></div>
+        <button id="reloadButton" class="touch-reload" type="button" aria-label="Reload">RELOAD</button>
+      </div>
+
+      <footer class="marquee">
+        <div><span class="lamp"></span><b id="creditLabel">CREDITS 0</b></div>
+        <p>Desktop: mouse + keyboard · Mobile: touch to aim/fire</p>
+        <button id="fullscreenButton" type="button">FULLSCREEN</button>
+      </footer>
+    </section>
+
+    <p class="legal-note">This Pages build is an original browser rail-shooter adaptation for this repository. It does not contain or stream the commercial THE HOUSE OF THE DEAD: Remake executable or proprietary game assets.</p>
+  </main>
+  <script src="./app.js?v=20260831-d2e89a-v2"></script>
+</body>
+</html>
