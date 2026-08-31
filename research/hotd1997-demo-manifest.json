@@ -1,0 +1,56 @@
+{
+  "project": "HOTD1997_PC_DEMO_BROWSER_PROOF",
+  "status": "SOURCE_FOUND_REDISTRIBUTION_UNVERIFIED",
+  "target": {
+    "title": "The House of the Dead",
+    "publisher": "SEGA",
+    "platform": "Windows 95",
+    "release_class": "official promotional demo"
+  },
+  "historical_package": {
+    "parts": [
+      "HOTDDEMO.ARJ",
+      "HOTDDEMO.A01",
+      "HOTDDEMO.A02",
+      "HOTDDEMO.A03"
+    ],
+    "archive_date": "1998-06-28",
+    "requirements": "Pentium 133, 16 MB RAM, Windows 95, DirectX, 3D acceleration"
+  },
+  "current_mirror_candidate": {
+    "provider": "FilePlanet / Download.it",
+    "page": "https://fileplanet.download.it/p-46299/The-House-of-the-Dead-Demo",
+    "listing": "Free download",
+    "developer": "SEGA",
+    "size": "15.4 MB",
+    "md5": "adec3d6ca6829a024350ef1fdb890d04",
+    "binary_in_repository": false,
+    "redistribution_permission_verified": false
+  },
+  "historical_distribution_evidence": [
+    "Apaja PC demo archive: HOTDDEMO 4-part SEGA demo",
+    "PC Zone #67 cover media: The House of the Dead [PC] demo/shareware",
+    "Generation 4 #114 cover media: The House of the Dead [PC] demo/shareware"
+  ],
+  "runtime": {
+    "name": "BoxedWine",
+    "upstream": "https://github.com/danoon2/Boxedwine",
+    "license": "GPL-2.0",
+    "web_support": true,
+    "candidate_program": "HOTD demo executable after package inspection",
+    "verified_with_hotd": false
+  },
+  "gates": {
+    "PACKAGE_IDENTITY_PASS": false,
+    "LICENSE_README_PASS": false,
+    "BOXEDWINE_NATIVE_PASS": false,
+    "BOXEDWINE_WASM_PASS": false,
+    "PAGES_PASS": false
+  },
+  "policy": {
+    "retail_rom_allowed": false,
+    "retail_disc_image_allowed": false,
+    "encrypted_retail_copy_allowed": false,
+    "unverified_external_rom_bridge_allowed": false
+  }
+}
