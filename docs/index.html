@@ -2,45 +2,71 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#090b10">
-  <title>HOTD Remake Arcade Launcher</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+  <meta name="theme-color" content="#05070a">
+  <meta name="description" content="Playable browser arcade rail-shooter build for the HotdRemake Arcade Plugin project.">
+  <title>HOTD Arcade · Browser Build</title>
   <link rel="stylesheet" href="./styles.css">
 </head>
 <body>
-  <main class="shell">
-    <section class="cabinet" aria-labelledby="title">
-      <p class="eyebrow">ARCADE PLUGIN · GITHUB PAGES</p>
-      <h1 id="title">THE HOUSE OF THE DEAD:<br><span>REMAKE</span></h1>
-      <p class="lead">Launch your locally installed Steam copy from this page.</p>
+  <main class="page">
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">HOTD REMAKE · ARCADE PLUGIN · WEB BUILD</p>
+        <h1>ARCADE <span>OUTBREAK</span></h1>
+      </div>
+      <a class="repo" href="https://github.com/Hawkar-usls/HotdRemake_ArcadePlugin" target="_blank" rel="noreferrer">SOURCE ↗</a>
+    </header>
 
-      <div class="panel">
-        <button id="launch" class="launch" type="button">▶ LAUNCH GAME</button>
-        <a class="secondary" href="https://store.steampowered.com/app/1694600/" target="_blank" rel="noreferrer">Open Steam store</a>
+    <section class="cabinet" aria-label="Browser arcade game">
+      <div class="screen-wrap">
+        <canvas id="game" width="1280" height="720" aria-label="Arcade rail shooter game canvas"></canvas>
+
+        <div id="hud" class="hud" aria-hidden="true">
+          <div class="hud-block left">
+            <span class="label">SCORE</span>
+            <strong id="score">0000000</strong>
+            <span class="mini">HIGH <b id="highScore">0000000</b></span>
+          </div>
+          <div class="hud-center">
+            <span id="waveLabel">WAVE 1</span>
+            <span id="comboLabel"></span>
+          </div>
+          <div class="hud-block right">
+            <span class="label">LIFE</span>
+            <strong id="life">♥ ♥ ♥ ♥ ♥</strong>
+            <span class="mini">AMMO <b id="ammo">● ● ● ● ● ●</b></span>
+          </div>
+        </div>
+
+        <div id="overlay" class="overlay">
+          <div class="overlay-card">
+            <p class="kicker">PLAYABLE GITHUB PAGES BUILD</p>
+            <h2 id="overlayTitle">INSERT COIN</h2>
+            <p id="overlayText">Press <kbd>5</kbd> to add a credit, then <kbd>1</kbd> to start.</p>
+            <button id="startButton" type="button">INSERT COIN & START</button>
+            <div class="controls">
+              <span><b>MOUSE / TOUCH</b> AIM</span>
+              <span><b>CLICK / TAP</b> FIRE</span>
+              <span><b>R</b> RELOAD</span>
+              <span><b>5</b> COIN</span>
+              <span><b>1</b> START</span>
+            </div>
+          </div>
+        </div>
+
+        <div id="damageFlash" class="damage-flash"></div>
+        <button id="reloadButton" class="touch-reload" type="button" aria-label="Reload">RELOAD</button>
       </div>
 
-      <div id="status" class="status" role="status" aria-live="polite">
-        Ready. The Arcade Plugin must already be installed in the Windows game directory.
-      </div>
-
-      <div class="grid">
-        <article>
-          <strong>1 · Install</strong>
-          <span>Install THE HOUSE OF THE DEAD: Remake through Steam.</span>
-        </article>
-        <article>
-          <strong>2 · Mod</strong>
-          <span>Install this repository's BepInEx Arcade Plugin next to the game executable.</span>
-        </article>
-        <article>
-          <strong>3 · Play</strong>
-          <span>Press LAUNCH GAME. Your browser hands the request to the Steam desktop client.</span>
-        </article>
-      </div>
-
-      <p class="note">GitHub Pages is a static web host. It cannot execute the Windows game or BepInEx DLL inside the browser; this launcher starts the legally installed local copy via Steam.</p>
-      <a class="repo" href="https://github.com/Hawkar-usls/HotdRemake_ArcadePlugin">View plugin source / installation notes ↗</a>
+      <footer class="marquee">
+        <div><span class="lamp"></span><b id="creditLabel">CREDITS 0</b></div>
+        <p>Desktop: mouse + keyboard · Mobile: touch to aim/fire</p>
+        <button id="fullscreenButton" type="button">FULLSCREEN</button>
+      </footer>
     </section>
+
+    <p class="legal-note">This Pages build is an original browser rail-shooter adaptation for this repository. It does not contain or stream the commercial THE HOUSE OF THE DEAD: Remake executable or proprietary game assets.</p>
   </main>
   <script src="./app.js"></script>
 </body>
