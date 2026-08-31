@@ -99,8 +99,8 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y -qq \
             build-essential libsdl2-dev libssl-dev libminizip-dev \
-            libcurl4-openssl-dev libgl1-mesa-dev xvfb x11-utils imagemagick \
-            unar p7zip-full ccd2iso file curl unzip
+            libcurl4-openssl-dev libgl1-mesa-dev libglu1-mesa-dev \
+            xvfb x11-utils imagemagick unar p7zip-full ccd2iso file curl unzip
 
       - name: Build native BoxedWine
         shell: bash
