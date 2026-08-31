@@ -1,0 +1,112 @@
+name: HOTD 1997 Demo Source Probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hotd1997-demo-source-probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-demo-source:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SOURCE_PAGE: https://fileplanet.download.it/p-46299/The-House-of-the-Dead-Demo
+      DOWNLOAD_URL: https://fileplanet.download.it/p-46299/The-House-of-the-Dead-Demo/download
+      EXPECTED_MD5: adec3d6ca6829a024350ef1fdb890d04
+    steps:
+      - name: Install archive inspection tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq p7zip-full arj file
+
+      - name: Fetch demo into ephemeral runner only
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/hotd-probe"
+          cd "$RUNNER_TEMP/hotd-probe"
+          curl --fail --location --retry 3 --retry-all-errors \
+            --user-agent 'Mozilla/5.0 (compatible; HOTD1997-license-probe/1.0)' \
+            --referer "$SOURCE_PAGE" \
+            --output hotd-demo.download \
+            "$DOWNLOAD_URL"
+          test -s hotd-demo.download
+          echo "DOWNLOAD_BYTES=$(stat -c %s hotd-demo.download)" | tee report.env
+          echo "DETECTED_TYPE=$(file -b hotd-demo.download)" | tee -a report.env
+          md5sum hotd-demo.download | tee md5.txt
+          sha256sum hotd-demo.download | tee sha256.txt
+          ACTUAL_MD5="$(cut -d' ' -f1 md5.txt)"
+          echo "ACTUAL_MD5=$ACTUAL_MD5" | tee -a report.env
+          if [[ "$ACTUAL_MD5" == "$EXPECTED_MD5" ]]; then
+            echo 'PACKAGE_IDENTITY_PASS=true' | tee -a report.env
+          else
+            echo 'PACKAGE_IDENTITY_PASS=false' | tee -a report.env
+            echo "::warning::Downloaded payload MD5 does not match the published FilePlanet MD5."
+          fi
+
+      - name: Inspect archive/package structure
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/hotd-probe"
+          mkdir extracted
+          if 7z l hotd-demo.download > archive-list.txt 2>&1; then
+            7z x -y -oextracted hotd-demo.download >/dev/null
+            echo 'ARCHIVE_EXTRACTOR=7z' | tee -a report.env
+          elif arj l hotd-demo.download > archive-list.txt 2>&1; then
+            (cd extracted && arj x ../hotd-demo.download >/dev/null)
+            echo 'ARCHIVE_EXTRACTOR=arj' | tee -a report.env
+          else
+            echo 'ARCHIVE_EXTRACTOR=none' | tee -a report.env
+            echo '::warning::Payload is not directly extractable by 7z/arj; it may be HTML, an installer wrapper, or another package format.'
+          fi
+          sed -n '1,160p' archive-list.txt || true
+
+      - name: Locate README, EULA and redistribution evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/hotd-probe"
+          : > evidence.txt
+          if [[ -d extracted ]]; then
+            find extracted -type f \
+              \( -iname 'readme*' -o -iname 'license*' -o -iname 'licence*' -o -iname 'eula*' -o -iname '*.txt' -o -iname '*.rtf' \) \
+              -print | sort | tee candidate-text-files.txt
+
+            while IFS= read -r f; do
+              [[ -f "$f" ]] || continue
+              echo "===== FILE: ${f#extracted/} =====" >> evidence.txt
+              strings -n 5 "$f" | grep -E -i -C 2 \
+                'redistribut|distribut|copy|shareware|freeware|demo|license|licence|permission|may be (freely )?(copied|distributed)|not for resale' \
+                | head -n 120 >> evidence.txt || true
+            done < candidate-text-files.txt
+          fi
+
+          if [[ -s evidence.txt ]]; then
+            echo 'LICENSE_TEXT_FOUND=true' | tee -a report.env
+            cat evidence.txt
+          else
+            echo 'LICENSE_TEXT_FOUND=false' | tee -a report.env
+            echo 'No explicit license/redistribution text was extracted by the automated probe.'
+          fi
+
+      - name: Emit non-binary audit summary
+        if: always()
+        shell: bash
+        run: |
+          cd "$RUNNER_TEMP/hotd-probe" 2>/dev/null || exit 0
+          echo '--- HOTD 1997 DEMO SOURCE PROBE ---'
+          cat report.env 2>/dev/null || true
+          echo 'EXPECTED_MD5=${{ env.EXPECTED_MD5 }}'
+          echo 'SOURCE_PAGE=${{ env.SOURCE_PAGE }}'
+          echo 'BINARY_PERSISTED=NO'
+          echo 'BINARY_UPLOADED=NO'
+          echo '--- SHA256 ---'
+          cat sha256.txt 2>/dev/null || true
