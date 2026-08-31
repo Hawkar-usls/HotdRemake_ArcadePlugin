@@ -97,6 +97,7 @@ jobs:
     timeout-minutes: 35
     env:
       CD_ARCHIVE: https://pixsoriginadventures.co.uk/PCZone/PC%20Zone%2067%20%28September%201998%29/CDZone%2367.rar
+      FILEPLANET_EXPECTED_MD5: adec3d6ca6829a024350ef1fdb890d04
     steps:
       - name: Install CloneCD and archive tools
         shell: bash
@@ -121,7 +122,6 @@ jobs:
           } | tee report/status.env
           unar -f -o outer cdzone67.rar > report/unar.log 2>&1
           echo OUTER_EXTRACT_PASS=true | tee -a report/status.env
-          find outer -maxdepth 2 -type f -printf '%P\t%s bytes\n' | sort | tee report/outer-files.txt
 
       - name: Decode CloneCD image to ISO
         shell: bash
@@ -130,69 +130,81 @@ jobs:
           cd "$RUNNER_TEMP/pczone67"
           IMG="$(find outer -type f -iname '*.img' -print -quit)"
           test -n "$IMG"
-          echo "CLONECD_IMG=${IMG#outer/}" | tee -a report/status.env
           ccd2iso "$IMG" cdzone67.iso > report/ccd2iso.log 2>&1
           test -s cdzone67.iso
           echo "ISO_BYTES=$(stat -c %s cdzone67.iso)" | tee -a report/status.env
           echo "ISO_SHA256=$(sha256sum cdzone67.iso | awk '{print $1}')" | tee -a report/status.env
           file -b cdzone67.iso | sed 's/^/ISO_TYPE=/' | tee -a report/status.env
 
-      - name: Inspect CD filesystem for HOTD
+      - name: Extract CD filesystem and locate HOTD
         shell: bash
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP/pczone67"
           mkdir -p cdroot
           7z l -slt cdzone67.iso > report/iso-list.txt
-          grep -E -i -C 3 'hotd|house.?of.?the.?dead|dead' report/iso-list.txt > report/hotd-iso-hits.txt || true
           7z x -y -ocdroot cdzone67.iso > report/iso-extract.log
           find cdroot -type f -printf '%p\n' | sort > report/cd-files.txt
           grep -E -i 'hotd|house.?of.?the.?dead' report/cd-files.txt > report/hotd-path-hits.txt || true
-          echo '--- HOTD ISO hits ---'
-          cat report/hotd-iso-hits.txt || true
-          echo '--- HOTD filesystem hits ---'
           cat report/hotd-path-hits.txt || true
-          if [[ -s report/hotd-path-hits.txt || -s report/hotd-iso-hits.txt ]]; then
+          if grep -E -i -q '/Gamedemo/Win95/hotd/Install\.exe$' report/hotd-path-hits.txt; then
             echo HOTD_ENTRY_FOUND=true | tee -a report/status.env
           else
             echo HOTD_ENTRY_FOUND=false | tee -a report/status.env
           fi
 
-      - name: Inspect HOTD installer and redistribution text
+      - name: Hash and inspect HOTD demo installer
         shell: bash
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP/pczone67"
-          INSTALLER="$(find cdroot -type f -iname 'hotd_demo.exe' -print -quit || true)"
-          if [[ -z "$INSTALLER" ]]; then INSTALLER="$(find cdroot -type f -iname '*hotd*.exe' -print -quit || true)"; fi
-          if [[ -z "$INSTALLER" ]]; then
-            echo INSTALLER_FOUND=false | tee -a report/status.env
-            exit 0
+          INSTALLER="$(find cdroot -type f -ipath '*/Gamedemo/Win95/hotd/Install.exe' -print -quit || true)"
+          test -n "$INSTALLER"
+          ACTUAL_MD5="$(md5sum "$INSTALLER" | awk '{print $1}')"
+          ACTUAL_SHA256="$(sha256sum "$INSTALLER" | awk '{print $1}')"
+          {
+            echo INSTALLER_FOUND=true
+            echo "INSTALLER_PATH=${INSTALLER#cdroot/}"
+            echo "INSTALLER_BYTES=$(stat -c %s "$INSTALLER")"
+            echo "INSTALLER_MD5=$ACTUAL_MD5"
+            echo "INSTALLER_SHA256=$ACTUAL_SHA256"
+            echo "FILEPLANET_EXPECTED_MD5=$FILEPLANET_EXPECTED_MD5"
+          } | tee -a report/status.env
+          if [[ "$ACTUAL_MD5" == "$FILEPLANET_EXPECTED_MD5" ]]; then
+            echo FILEPLANET_MD5_MATCH=true | tee -a report/status.env
+            echo PACKAGE_IDENTITY_CROSS_SOURCE_PASS=true | tee -a report/status.env
+          else
+            echo FILEPLANET_MD5_MATCH=false | tee -a report/status.env
+            echo PACKAGE_IDENTITY_CROSS_SOURCE_PASS=false | tee -a report/status.env
           fi
-          echo INSTALLER_FOUND=true | tee -a report/status.env
-          echo "INSTALLER_PATH=${INSTALLER#cdroot/}" | tee -a report/status.env
-          echo "INSTALLER_BYTES=$(stat -c %s "$INSTALLER")" | tee -a report/status.env
-          echo "INSTALLER_MD5=$(md5sum "$INSTALLER" | awk '{print $1}')" | tee -a report/status.env
-          echo "INSTALLER_SHA256=$(sha256sum "$INSTALLER" | awk '{print $1}')" | tee -a report/status.env
           file -b "$INSTALLER" | sed 's/^/INSTALLER_TYPE=/' | tee -a report/status.env
 
           mkdir -p installer-inner
           7z l -slt "$INSTALLER" > report/installer-list.txt 2>&1 || true
           7z x -y -oinstaller-inner "$INSTALLER" > report/installer-extract.log 2>&1 || true
-          : > report/license-candidates.txt
+          find installer-inner -type f -printf '%p\t%s bytes\n' | sort > report/installer-inner-files.txt || true
+
+      - name: Search original package for license and redistribution evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/pczone67"
+          INSTALLER="$(find cdroot -type f -ipath '*/Gamedemo/Win95/hotd/Install.exe' -print -quit)"
           PARENT="$(dirname "$INSTALLER")"
+          : > report/license-candidates.txt
+          : > report/license-evidence.txt
           for ROOT in "$PARENT" installer-inner; do
             [[ -d "$ROOT" ]] || continue
-            find "$ROOT" -type f \( -iname 'readme*' -o -iname 'license*' -o -iname 'licence*' -o -iname 'eula*' -o -iname '*.txt' -o -iname '*.rtf' \) -print >> report/license-candidates.txt || true
+            find "$ROOT" -type f \( -iname 'readme*' -o -iname 'license*' -o -iname 'licence*' -o -iname 'eula*' -o -iname '*.txt' -o -iname '*.rtf' -o -iname '*.ini' \) -print >> report/license-candidates.txt || true
           done
           sort -u -o report/license-candidates.txt report/license-candidates.txt
           {
             echo '===== INSTALLER STRINGS ====='
-            strings -n 5 "$INSTALLER" | grep -E -i -C 3 'redistribut|distribut|copy|shareware|freeware|demo|license|licence|permission|may be (freely )?(copied|distributed)|not for resale' | head -n 260 || true
+            strings -n 5 "$INSTALLER" | grep -E -i -C 4 'redistribut|distribut|copy|shareware|freeware|demo|license|licence|permission|may be (freely )?(copied|distributed)|not for resale' | head -n 360 || true
             while IFS= read -r f; do
               [[ -f "$f" ]] || continue
               echo "===== FILE: ${f#cdroot/} ====="
-              strings -n 5 "$f" | grep -E -i -C 3 'redistribut|distribut|copy|shareware|freeware|demo|license|licence|permission|may be (freely )?(copied|distributed)|not for resale' | head -n 180 || true
+              strings -n 5 "$f" | grep -E -i -C 4 'redistribut|distribut|copy|shareware|freeware|demo|license|licence|permission|may be (freely )?(copied|distributed)|not for resale' | head -n 220 || true
             done < report/license-candidates.txt
           } > report/license-evidence.txt
           if grep -E -i -q 'may be (freely )?(copied|distributed)|freely distribut|redistribut' report/license-evidence.txt; then
@@ -200,14 +212,18 @@ jobs:
           else
             echo REDISTRIBUTION_TEXT_CANDIDATE=false | tee -a report/status.env
           fi
-          echo LICENSE_TEXT_FOUND=true | tee -a report/status.env
-          sed -n '1,380p' report/license-evidence.txt
+          if [[ -s report/license-evidence.txt ]]; then
+            echo LICENSE_TEXT_FOUND=true | tee -a report/status.env
+            sed -n '1,440p' report/license-evidence.txt
+          else
+            echo LICENSE_TEXT_FOUND=false | tee -a report/status.env
+          fi
 
       - name: Upload text-only cover CD report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: hotd1997-pczone67-clonecd-report
+          name: hotd1997-pczone67-hotd-installer-report
           path: ${{ runner.temp }}/pczone67/report
           if-no-files-found: warn
           retention-days: 30
