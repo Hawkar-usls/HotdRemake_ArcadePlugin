@@ -1,0 +1,86 @@
+name: HOTD 1997 BoxedWine Runtime Proof
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - research/hotd1997-pc-demo-boxedwine
+    paths:
+      - '.github/workflows/hotd1997-boxedwine-runtime-proof.yml'
+      - 'research/**'
+
+permissions:
+  contents: read
+
+jobs:
+  build-boxedwine-wasm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout proof branch
+        uses: actions/checkout@v4
+
+      - name: Checkout BoxedWine upstream
+        uses: actions/checkout@v4
+        with:
+          repository: danoon2/Boxedwine
+          path: upstream/Boxedwine
+          fetch-depth: 1
+
+      - name: Record upstream revision
+        id: upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd upstream/Boxedwine
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          git rev-parse HEAD | tee ../../research/BOXEDWINE_UPSTREAM_SHA.txt
+
+      - name: Setup Emscripten SDK
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: latest
+          actions-cache-folder: emsdk-cache
+
+      - name: Verify toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          emcc --version
+          em++ --version
+
+      - name: Build single-threaded BoxedWine Web runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd upstream/Boxedwine/project/emscripten
+          make release
+          test -f Build/Release/boxedwine.html
+          test -f Build/Release/boxedwine.js
+          test -f Build/Release/boxedwine.wasm
+
+      - name: Assemble proof artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf proof-artifact
+          mkdir -p proof-artifact/runtime proof-artifact/evidence
+          cp -a upstream/Boxedwine/project/emscripten/Build/Release/. proof-artifact/runtime/
+          cp research/HOTD1997_DEMO_SOURCE_GATE.md proof-artifact/evidence/
+          cp research/hotd1997-demo-manifest.json proof-artifact/evidence/
+          cp research/BOXEDWINE_UPSTREAM_SHA.txt proof-artifact/evidence/
+          cat > proof-artifact/evidence/STATUS.txt <<EOF
+          BOXEDWINE_WASM_RUNTIME_BUILD=PASS
+          BOXEDWINE_UPSTREAM_SHA=${{ steps.upstream.outputs.sha }}
+          HOTD_DEMO_BINARY_INCLUDED=NO
+          HOTD_LICENSE_GATE=UNVERIFIED
+          EOF
+          find proof-artifact -maxdepth 3 -type f -printf '%P\n' | sort
+
+      - name: Upload BoxedWine Web runtime proof
+        uses: actions/upload-artifact@v4
+        with:
+          name: hotd1997-boxedwine-web-runtime
+          path: proof-artifact
+          if-no-files-found: error
+          retention-days: 30
