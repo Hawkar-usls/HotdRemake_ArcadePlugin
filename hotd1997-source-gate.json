@@ -1,0 +1,35 @@
+{
+  "schema": "HOTD1997_AUTHORIZED_SOURCE_GATE_v1",
+  "updated": "2026-09-01",
+  "target": {
+    "title": "The House of the Dead",
+    "platform": "Windows PC demo",
+    "era": "1998",
+    "installer_sha256": "6150da85cd5e7ba88bbe722aba8202d5f8726b66eb1e8614b2bda5e89ae76944"
+  },
+  "runtime": {
+    "engine": "BoxedWine 26R1 / Wine 6 single-threaded WebAssembly",
+    "runtime_smoke_pass": true,
+    "human_playability_proven": false
+  },
+  "authorized_source": {
+    "status": "OPEN",
+    "source_url": null,
+    "authorization_evidence_url": null,
+    "authorization_holder": "SEGA",
+    "permission_request_sent": true,
+    "permission_request_recipient": "soalegal@segaamerica.com",
+    "permission_request_date": "2026-09-01"
+  },
+  "public_deployment": {
+    "game_body_deployed": false,
+    "public_playable_pass": false
+  },
+  "activation_rule": "PUBLIC_PLAYABLE_PASS may become true only when AUTHORIZED_SOURCE.status is PASS, authorization evidence is recorded, the public URL itself loads the authorized game body, and a human-input gate proves title/start/aim/fire/gameplay without local user files.",
+  "forbidden_shortcuts": [
+    "pirated retail ROM/disc images",
+    "unverified abandonware mirrors",
+    "obfuscated or encrypted redistribution",
+    "pixel-delta-only playable claims"
+  ]
+}
