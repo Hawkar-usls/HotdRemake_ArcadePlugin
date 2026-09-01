@@ -1,0 +1,110 @@
+name: Sync BoxedWine Personal Runtime
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/sync-boxedwine-personal-runtime.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BASE: https://boxedwine.org/v/26R1/wine6/st
+      DEST: vendor/boxedwine26r1
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch official BoxedWine 26R1 Wine6 ST runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf "$DEST"
+          mkdir -p "$DEST"
+          curl -fsSL --retry 3 -o "$DEST/boxedwine.html" "$BASE/boxedwine.html"
+          curl -fsSL --retry 3 -o "$DEST/boxedwine.zip"  "$BASE/boxedwine.zip"
+          curl -fsSL --retry 3 -o "$DEST/boxedwine.js"   "$BASE/boxedwine.js"
+          curl -fsSL --retry 3 -o "$DEST/boxedwine.wasm" "$BASE/boxedwine.wasm"
+          python3 - <<'PY'
+          from pathlib import Path
+          import re, subprocess
+          base='https://boxedwine.org/v/26R1/wine6/st/'
+          dest=Path('vendor/boxedwine26r1')
+          html=(dest/'boxedwine.html').read_text(errors='replace')
+          refs=[]
+          for pat in (r'<script[^>]+src=["\']([^"\']+)', r'<link[^>]+href=["\']([^"\']+)'):
+              refs += re.findall(pat, html, re.I)
+          refs += ['boxedwine-shell.js','boxedwine.css']
+          for ref in refs:
+              ref=ref.split('?',1)[0]
+              if not ref or '://' in ref or ref.startswith('/') or ref.startswith('data:'):
+                  continue
+              out=dest/ref
+              out.parent.mkdir(parents=True, exist_ok=True)
+              if out.exists():
+                  continue
+              subprocess.run(['curl','-fsSL','--retry','3','-o',str(out),base+ref],check=True)
+          PY
+          test -s "$DEST/boxedwine-shell.js"
+          unzip -tq "$DEST/boxedwine.zip" >/dev/null
+
+      - name: Patch memory-payload bridge
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('vendor/boxedwine26r1/boxedwine-shell.js')
+          s=p.read_text()
+          marker='        function setConfiguration() {'
+          bridge=r'''
+        // HOTD PERSONAL BRIDGE: game payload stays in the authenticated user's browser memory.
+        window.hotdBridgeSetPayload = function(payload, program) {
+            if (typeof payload !== "string" || payload.length < 1024) {
+                throw new Error("HOTD payload is empty");
+            }
+            Config.appPayload = payload;
+            Config.appZipFile = "";
+            Config.Program = program || "c:/files/rundemo.exe";
+            Config.ProgramArgs = [];
+            Config.WorkingDir = "";
+            Config.storageMode = STORAGE_MEMORY;
+            return { ok: true, payloadChars: payload.length, program: Config.Program };
+        };
+        window.hotdBridgeStart = function() {
+            if (isRunning) return false;
+            start();
+            return true;
+        };
+        window.hotdBridgeStatus = function() {
+            return { running: isRunning, ready: typeof start === "function" };
+        };
+
+'''
+          if 'window.hotdBridgeSetPayload' not in s:
+              if marker not in s:
+                  raise SystemExit('setConfiguration marker missing')
+              s=s.replace(marker,bridge+marker,1)
+          p.write_text(s)
+          PY
+          grep -q 'window.hotdBridgeSetPayload' "$DEST/boxedwine-shell.js"
+          ! find "$DEST" -type f -iname '*hotd*' | grep -q .
+
+      - name: Commit open-source runtime only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add "$DEST"
+          if git diff --cached --quiet; then
+            echo 'Runtime already current'
+            exit 0
+          fi
+          git commit -m 'Vendor BoxedWine 26R1 personal runtime'
+          git push
