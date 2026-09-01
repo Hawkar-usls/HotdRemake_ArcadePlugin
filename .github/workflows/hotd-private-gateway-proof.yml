@@ -1,3 +1,4 @@
+# Registered after initial creation so GitHub Actions sees this workflow on main.
 name: HOTD 1997 Private Gateway Proof
 
 on:
