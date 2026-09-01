@@ -1,27 +1,15 @@
 {
   "project": "HOTD1997_PC_DEMO_BROWSER_PROOF",
-  "status": "PACKAGE_IDENTITY_PASS_RUNTIME_BUILD_PASS_LICENSE_OPEN",
+  "status": "PACKAGE_IDENTITY_PASS_NATIVE_HOTD_PASS_RUNTIME_BUILD_PASS_LICENSE_OPEN_WASM_OPEN",
   "target": {
     "title": "The House of the Dead",
     "publisher": "SEGA",
     "platform": "Windows 95",
     "release_class": "official promotional demo"
   },
-  "historical_package": {
-    "archive_date": "1998-06-28",
-    "indexed_parts": [
-      "HOTDDEMO.ARJ",
-      "HOTDDEMO.A01",
-      "HOTDDEMO.A02",
-      "HOTDDEMO.A03"
-    ],
-    "requirements": "Pentium 133, 16 MB RAM, Windows 95, DirectX, 3D acceleration"
-  },
   "pczone67_source": {
     "outer_archive_bytes": 635457476,
     "outer_archive_sha256": "1a8695d904886e028b4e14aa59b85934c1d867ed03d2f3a18c9d202691efa1ba",
-    "outer_archive_type": "RAR v4",
-    "container": "CloneCD",
     "decoded_iso_bytes": 643723264,
     "decoded_iso_sha256": "0959a52365b22f23ed7f18ff704de67258bf488670c25e9422e4fbea9d6a8104",
     "decoded_iso_label": "DPPCZ0998",
@@ -29,60 +17,99 @@
     "installer_bytes": 15964271,
     "installer_md5": "f26a2405e5c63f31aa7b2dcdafa27842",
     "installer_sha256": "6150da85cd5e7ba88bbe722aba8202d5f8726b66eb1e8614b2bda5e89ae76944",
-    "installer_type": "PE32 executable GUI Intel 80386 for MS Windows",
-    "internal_program": "hotd_demo/rundemo.exe",
-    "internal_readme": "hotd_demo/README.TXT",
-    "readme_identity": {
-      "title": "The House Of The Dead DEMO",
-      "version": "PC DEMO version 1/5/98",
-      "class": "DEMO (trial) version",
-      "directx": "DirectX 5 required; not included",
-      "lightgun": "disabled in demo"
-    },
+    "game_executable": "THOTDEMO.exe",
+    "game_executable_sha256": "96951e783957858d20d181884ecd0566d53f91a88586345dc6fd126ca986d29f",
     "binary_in_repository": false,
     "binary_uploaded_as_artifact": false
-  },
-  "fileplanet_candidate": {
-    "page": "https://fileplanet.download.it/p-46299/The-House-of-the-Dead-Demo",
-    "listing": "Free download",
-    "developer": "SEGA",
-    "size": "15.4 MB",
-    "published_md5": "adec3d6ca6829a024350ef1fdb890d04",
-    "probe_result": "HTTP_403_HTML_ANTI_BOT",
-    "md5_matches_pczone_installer": false,
-    "interpretation": "different wrapper or revision; FilePlanet binary not fetched"
   },
   "license_evidence": {
     "original_readme_inspected": true,
     "redistribution_text_candidate": false,
-    "redistribution_permission_verified": false
+    "redistribution_permission_verified": false,
+    "public_binary_hosting_allowed_by_project": false
   },
   "runtime": {
     "name": "BoxedWine",
-    "upstream": "https://github.com/danoon2/Boxedwine",
-    "upstream_sha": "2473488cfcf1ba914daf5aad097da0c59bb16073",
     "license": "GPL-2.0",
     "web_support": true,
-    "runtime_build_pass": true,
-    "build_run_id": 33447803130,
-    "build_job_id": 99670699269,
-    "artifact_id": 9778739317,
-    "artifact_sha256": "d92e1dc6d891cdeaa34f9dd9bc2cf4599ac9be28fc795c79b8ecc80a3d9f3029",
-    "linker_compat_patch": "final link CC/emcc -> CXX/em++",
-    "verified_with_hotd": false
+    "modern_wasm_runtime_build": {
+      "upstream_sha": "2473488cfcf1ba914daf5aad097da0c59bb16073",
+      "pass": true,
+      "run_id": 33447803130,
+      "job_id": 99670699269,
+      "artifact_id": 9778739317,
+      "artifact_sha256": "d92e1dc6d891cdeaa34f9dd9bc2cf4599ac9be28fc795c79b8ecc80a3d9f3029",
+      "hotd_verified": false
+    },
+    "exact_era_native": {
+      "upstream_sha": "5a2195ba47a169455c2dbe6bcb4bae4c256c9bad",
+      "release": "20.1.2",
+      "cpu_core": "normal",
+      "mmu": "softmmu",
+      "thread_model": "singleThreaded",
+      "native_binary_sha256": "963d975f1003e35963dd990a5bfb51ef9474f2a8d8446c7df714ebd2ae554e9c",
+      "web_execution_core_alignment": true,
+      "run_id": 33460686139,
+      "artifact_id": 9783267687,
+      "artifact_sha256": "ab095e639186fc0d1de467c97c28aaf68f02600ed36bebf906b9f6565a704084",
+      "wine_semantic_baseline": {
+        "pass_count": 4,
+        "total_lanes": 4
+      },
+      "hotd": {
+        "launch_pass": true,
+        "motion_pass": true,
+        "winning_lanes": [
+          {
+            "lane": "split17",
+            "wine": "1.7/1.8 lineage",
+            "state": "ALIVE",
+            "crash": false,
+            "visual_delta_from_blank": 306281,
+            "motion_delta_after_input": 48303,
+            "window_count": 4
+          },
+          {
+            "lane": "full17",
+            "wine": "1.7/1.8 lineage",
+            "state": "ALIVE",
+            "crash": false,
+            "visual_delta_from_blank": 306281,
+            "motion_delta_after_input": 48343,
+            "window_count": 4
+          }
+        ],
+        "negative_control": {
+          "wine_5_0_process_alive": true,
+          "wine_5_0_visual_delta": 0,
+          "wine_5_0_motion_delta": 0,
+          "verdict": "FAIL_NO_VISUAL_OUTPUT"
+        }
+      }
+    }
   },
   "gates": {
     "PACKAGE_IDENTITY_PASS": true,
     "LICENSE_README_PASS": false,
-    "BOXEDWINE_NATIVE_PASS": false,
+    "BOXEDWINE_NATIVE_PASS": true,
+    "BOXEDWINE_NATIVE_HOTD_LAUNCH_PASS": true,
+    "BOXEDWINE_NATIVE_HOTD_MOTION_PASS": true,
     "BOXEDWINE_RUNTIME_BUILD_PASS": true,
     "BOXEDWINE_WASM_PASS": false,
     "PAGES_PASS": false
+  },
+  "successor": {
+    "runtime_sha": "5a2195ba47a169455c2dbe6bcb4bae4c256c9bad",
+    "execution_core": "normal+softmmu+singleThreaded",
+    "wine_lane": "Wine-1.7",
+    "target": "exact-era Emscripten browser execution",
+    "binary_delivery_policy": "ephemeral CI or local user import only until redistribution permission is verified"
   },
   "policy": {
     "retail_rom_allowed": false,
     "retail_disc_image_allowed": false,
     "encrypted_retail_copy_allowed": false,
-    "unverified_external_rom_bridge_allowed": false
+    "unverified_external_rom_bridge_allowed": false,
+    "publish_sega_demo_binary": false
   }
 }
