@@ -1,4 +1,4 @@
-name: HOTD 1997 Modern BoxedWine Web Proof
+name: HOTD 1997 Official 26R1 Wine6 Web Proof
 
 on:
   workflow_dispatch:
@@ -11,13 +11,11 @@ permissions:
   contents: read
 
 jobs:
-  modern-web-proof:
+  official-26r1-wine6-proof:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 35
     env:
-      BOXEDWINE_SHA: 2473488cfcf1ba914daf5aad097da0c59bb16073
-      WINE_ROOT_URL: https://sourceforge.net/projects/boxedwine/files/FileSystems/Full/v5/Debian10-Wine-5.0.zip/download
-      WINE_ROOT_FILE: Debian10-Wine-5.0.zip
+      BOXEDWINE_WEB_BASE: https://boxedwine.org/v/26R1/wine6/st
       PCZONE_CD_ARCHIVE: https://pixsoriginadventures.co.uk/PCZone/PC%20Zone%2067%20%28September%201998%29/CDZone%2367.rar
       PCZONE_RAR_SHA256: 1a8695d904886e028b4e14aa59b85934c1d867ed03d2f3a18c9d202691efa1ba
       HOTD_INSTALLER_SHA256: 6150da85cd5e7ba88bbe722aba8202d5f8726b66eb1e8614b2bda5e89ae76944
@@ -27,76 +25,65 @@ jobs:
         run: |
           set -euo pipefail
           sudo apt-get update -qq
-          sudo apt-get install -y -qq --no-install-recommends git curl unzip zip unar p7zip-full ccd2iso python3 imagemagick
+          sudo apt-get install -y -qq --no-install-recommends curl unzip zip unar p7zip-full ccd2iso python3 imagemagick
           mkdir -p lab site report
 
-      - name: Checkout modern BoxedWine
-        shell: bash
-        run: |
-          set -euo pipefail
-          git clone -q https://github.com/danoon2/Boxedwine.git lab/Boxedwine
-          cd lab/Boxedwine
-          git checkout -q "$BOXEDWINE_SHA"
-          test "$(git rev-parse HEAD)" = "$BOXEDWINE_SHA"
-          git show -s --format='BOXEDWINE_SHA=%H%nBOXEDWINE_DATE=%cI%nBOXEDWINE_SUBJECT=%s' HEAD | tee "$GITHUB_WORKSPACE/report/source.env"
-
-      - name: Setup modern Emscripten
-        uses: mymindstorm/setup-emsdk@v14
-        with:
-          version: latest
-
-      - name: Build modern single-threaded Web runtime
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd lab/Boxedwine/project/emscripten
-          cp makefile makefile.original
-          python3 - <<'PY'
-          from pathlib import Path
-          p=Path('makefile'); s=p.read_text()
-          candidates=['\t@$(CC) $(ALL)','\t$(CC) $(ALL)']
-          changed=False
-          for old in candidates:
-              if old in s:
-                  s=s.replace(old, old.replace('$(CC)','$(CXX)'))
-                  changed=True
-          p.write_text(s)
-          print('CXX_LINK_COMPAT_PATCH='+str(changed).lower())
-          PY
-          make release > "$GITHUB_WORKSPACE/report/build.log" 2>&1
-          OUT=Build/Release
-          test -s "$OUT/boxedwine.html" && test -s "$OUT/boxedwine.js" && test -s "$OUT/boxedwine.wasm"
-          cp -a "$OUT"/. "$GITHUB_WORKSPACE/site/"
-          sha256sum "$OUT/boxedwine.html" "$OUT/boxedwine.js" "$OUT/boxedwine.wasm" | tee "$GITHUB_WORKSPACE/report/runtime-sha256.txt"
-          echo MODERN_WEB_RUNTIME_BUILD_PASS=true | tee "$GITHUB_WORKSPACE/report/build-gate.env"
-
-      - name: Fetch official Wine 5 root and genuine demo ephemerally
+      - name: Fetch exact official BoxedWine 26R1 Wine6 single-threaded web stack
         shell: bash
         run: |
           set -euo pipefail
           cd site
-          curl --fail --location --retry 3 -o "$WINE_ROOT_FILE" "$WINE_ROOT_URL"
-          unzip -tq "$WINE_ROOT_FILE" >/dev/null
-          sha256sum "$WINE_ROOT_FILE" | tee "$GITHUB_WORKSPACE/report/wine-root-sha256.txt"
-          cd ../lab
+          curl --fail --location --retry 3 -o boxedwine.html "$BOXEDWINE_WEB_BASE/boxedwine.html"
+          curl --fail --location --retry 3 -o boxedwine.zip "$BOXEDWINE_WEB_BASE/boxedwine.zip"
+          # Discover same-origin assets directly from the official HTML so this proof
+          # follows the released 26R1 page rather than guessing an old asset list.
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          s=Path('boxedwine.html').read_text(errors='replace')
+          refs=[]
+          for pat in (r'<script[^>]+src=["\']([^"\']+)', r'<link[^>]+href=["\']([^"\']+)'):
+              refs += re.findall(pat,s,re.I)
+          refs += ['boxedwine.js','boxedwine.wasm']
+          keep=[]
+          for x in refs:
+              x=x.split('?',1)[0]
+              if not x or '://' in x or x.startswith('/') or x.startswith('data:'): continue
+              if x not in keep: keep.append(x)
+          Path('../lab/assets.txt').write_text('\n'.join(keep)+'\n')
+          print('\n'.join(keep))
+          PY
+          while IFS= read -r f; do
+            mkdir -p "$(dirname "$f")"
+            curl --fail --location --retry 3 -o "$f" "$BOXEDWINE_WEB_BASE/$f"
+          done < ../lab/assets.txt
+          unzip -tq boxedwine.zip >/dev/null
+          sha256sum boxedwine.html boxedwine.js boxedwine.wasm boxedwine.zip | tee ../report/official-runtime-sha256.txt
+          printf 'OFFICIAL_RELEASE=26R1\nWINE_LINE=6\nTHREADING=single\nOFFICIAL_RUNTIME_FETCH_PASS=true\n' > ../report/runtime.env
+
+      - name: Fetch genuine HOTD demo ephemerally
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd lab
           mkdir -p cd-outer cd-root installer-inner
           curl --fail --location --retry 3 -o cdzone67.rar "$PCZONE_CD_ARCHIVE"
           test "$(sha256sum cdzone67.rar | awk '{print $1}')" = "$PCZONE_RAR_SHA256"
           unar -f -o cd-outer cdzone67.rar >/dev/null
           IMG="$(find cd-outer -type f -iname '*.img' -print -quit)"
+          test -n "$IMG"
           ccd2iso "$IMG" cdzone67.iso >/dev/null
           7z x -y -ocd-root cdzone67.iso >/dev/null
           INSTALLER="$(find cd-root -type f -ipath '*/Gamedemo/Win95/hotd/Install.exe' -print -quit)"
+          test -n "$INSTALLER"
           test "$(sha256sum "$INSTALLER" | awk '{print $1}')" = "$HOTD_INSTALLER_SHA256"
           7z x -y -oinstaller-inner "$INSTALLER" >/dev/null
           GAME_DIR="$(find installer-inner -type d -iname hotd_demo -print -quit)"
           test -f "$GAME_DIR/THOTDEMO.exe"
+          test -f "$GAME_DIR/RUNDEMO.EXE" || test -f "$GAME_DIR/rundemo.exe"
           find "$GAME_DIR" -maxdepth 1 -type f -printf '%f\n' | sort > "$GITHUB_WORKSPACE/report/game-file-names.txt"
           (cd "$GAME_DIR" && zip -qr "$GITHUB_WORKSPACE/site/hotd.zip" .)
-          echo PACKAGE_IDENTITY_PASS=true | tee "$GITHUB_WORKSPACE/report/package.env"
-          echo WINE_ROOT=5.0 >> "$GITHUB_WORKSPACE/report/package.env"
-          echo HOTD_BINARY_PERSISTED=NO >> "$GITHUB_WORKSPACE/report/package.env"
-          echo HOTD_BINARY_UPLOADED=NO >> "$GITHUB_WORKSPACE/report/package.env"
+          printf 'PACKAGE_IDENTITY_PASS=true\nHOTD_BINARY_PERSISTED=NO\nHOTD_BINARY_UPLOADED=NO\n' > "$GITHUB_WORKSPACE/report/package.env"
 
       - name: Install Chromium
         shell: bash
@@ -106,7 +93,7 @@ jobs:
           npm install --silent playwright@1.55.0
           npx playwright install --with-deps chromium >/dev/null
 
-      - name: Serve modern runtime
+      - name: Serve exact official runtime locally
         shell: bash
         run: |
           cd site
@@ -115,33 +102,55 @@ jobs:
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8000/boxedwine.html >/dev/null && exit 0; sleep 1; done
           exit 1
 
-      - name: Test RUNDEMO and THOTDEMO lanes
+      - name: Prove RUNDEMO and THOTDEMO real motion
         shell: bash
         run: |
           set -euo pipefail
           cd lab
           cat > proof.js <<'NODE'
-          const { chromium }=require('playwright'); const fs=require('fs'); const {execFileSync}=require('child_process');
-          function delta(a,b){try{execFileSync('compare',['-metric','AE',a,b,'null:'],{stdio:['ignore','pipe','pipe']});return 0}catch(e){const v=String(e.stderr||'').trim();return /^\d+$/.test(v)?Number(v):0}}
+          const { chromium }=require('playwright');
+          const fs=require('fs');
+          const {execFileSync}=require('child_process');
+          function delta(a,b){
+            try { execFileSync('compare',['-metric','AE',a,b,'null:'],{stdio:['ignore','pipe','pipe']}); return 0; }
+            catch(e){ const v=String(e.stderr||'').trim(); return /^\d+$/.test(v)?Number(v):0; }
+          }
           async function lane(browser, program, key){
             const out=process.env.GITHUB_WORKSPACE+'/report', tmp=process.env.RUNNER_TEMP, logs=[], errs=[];
-            const page=await browser.newPage({viewport:{width:1024,height:768}}); page.on('console',m=>logs.push(`[${m.type()}] ${m.text()}`)); page.on('pageerror',e=>errs.push(String(e)));
-            const url=`http://127.0.0.1:8000/boxedwine.html?root=Debian10-Wine-5.0&app=hotd&p=${encodeURIComponent(program)}&resolution=640x480&bpp=16&sound=false&auto=true`;
-            await page.goto(url,{waitUntil:'domcontentloaded',timeout:30000}); await page.screenshot({path:`${tmp}/${key}-0.png`});
-            await page.waitForTimeout(15000); await page.screenshot({path:`${tmp}/${key}-1.png`});
-            await page.keyboard.press('Enter').catch(()=>{}); await page.keyboard.press('Space').catch(()=>{}); await page.mouse.move(320,240).catch(()=>{}); await page.mouse.click(320,240).catch(()=>{});
-            await page.waitForTimeout(10000); await page.screenshot({path:`${tmp}/${key}-2.png`});
-            const boot=delta(`${tmp}/${key}-0.png`,`${tmp}/${key}-1.png`), motion=delta(`${tmp}/${key}-1.png`,`${tmp}/${key}-2.png`), text=logs.join('\n')+'\n'+errs.join('\n');
-            const debuggerSig=/(starting debugger|wine debugger|winedbg|unhandled page fault|unhandled exception|assertion failed|double free|corruption|segmentation fault|setjmp is required|unimplemented function|failed to initialize|abort\(|RuntimeError)/i.test(text);
-            const launch=/Launching .*wine/i.test(text); const pass=errs.length===0&&!debuggerSig&&launch&&boot>0&&motion>0;
-            fs.writeFileSync(`${out}/${key}-console.log`,logs.join('\n')+'\n'); fs.writeFileSync(`${out}/${key}-errors.log`,errs.join('\n')+'\n');
-            fs.writeFileSync(`${out}/${key}-gate.env`,[`PROGRAM=${program}`,`PAGE_ERROR_COUNT=${errs.length}`,`LAUNCH_LOG=${launch}`,`DEBUGGER_OR_CRASH_SIGNATURE=${debuggerSig}`,`BOOT_DELTA=${boot}`,`MOTION_DELTA=${motion}`,`PLAYABLE_MOTION_PASS=${pass}`].join('\n')+'\n');
-            await page.close(); for(const n of [0,1,2]){try{fs.unlinkSync(`${tmp}/${key}-${n}.png`)}catch(_){}}
+            const page=await browser.newPage({viewport:{width:1024,height:768}});
+            page.on('console',m=>logs.push(`[${m.type()}] ${m.text()}`));
+            page.on('pageerror',e=>errs.push(String(e)));
+            const url=`http://127.0.0.1:8000/boxedwine.html?app=hotd&p=${encodeURIComponent(program)}&resolution=640x480&bpp=16&sound=false&auto=true&disableHideCursor=true`;
+            await page.goto(url,{waitUntil:'domcontentloaded',timeout:30000});
+            await page.screenshot({path:`${tmp}/${key}-0.png`});
+            await page.waitForTimeout(18000);
+            await page.screenshot({path:`${tmp}/${key}-1.png`});
+            for (const k of ['Enter','Space','1','5']) await page.keyboard.press(k).catch(()=>{});
+            await page.mouse.move(320,240).catch(()=>{});
+            await page.mouse.click(320,240).catch(()=>{});
+            await page.waitForTimeout(12000);
+            await page.screenshot({path:`${tmp}/${key}-2.png`});
+            const boot=delta(`${tmp}/${key}-0.png`,`${tmp}/${key}-1.png`);
+            const motion=delta(`${tmp}/${key}-1.png`,`${tmp}/${key}-2.png`);
+            const text=logs.join('\n')+'\n'+errs.join('\n');
+            const crash=/(starting debugger|wine debugger|winedbg|unhandled page fault|unhandled exception|assertion failed|double free|corruption|segmentation fault|setjmp is required|unimplemented function|failed to initialize|abort\(|RuntimeError|Internal crash)/i.test(text);
+            const launch=/Launching .*wine/i.test(text);
+            const pass=errs.length===0&&!crash&&launch&&boot>0&&motion>0;
+            fs.writeFileSync(`${out}/${key}-console.log`,logs.join('\n')+'\n');
+            fs.writeFileSync(`${out}/${key}-errors.log`,errs.join('\n')+'\n');
+            fs.writeFileSync(`${out}/${key}-gate.env`,[`PROGRAM=${program}`,`PAGE_ERROR_COUNT=${errs.length}`,`LAUNCH_LOG=${launch}`,`CRASH_SIGNATURE=${crash}`,`BOOT_DELTA=${boot}`,`MOTION_DELTA=${motion}`,`PLAYABLE_MOTION_PASS=${pass}`].join('\n')+'\n');
+            await page.close();
+            for(const n of [0,1,2]) try{fs.unlinkSync(`${tmp}/${key}-${n}.png`)}catch(_){}
             return pass;
           }
-          (async()=>{const browser=await chromium.launch({headless:true,args:['--disable-dev-shm-usage','--enable-webgl','--enable-unsafe-swiftshader','--ignore-gpu-blocklist']});
-            const a=await lane(browser,'RUNDEMO.EXE','rundemo'); const b=await lane(browser,'THOTDEMO.exe','thotdemo'); await browser.close();
-            fs.writeFileSync(process.env.GITHUB_WORKSPACE+'/report/final.env',`RUNDEMO_PASS=${a}\nTHOTDEMO_PASS=${b}\nANY_PLAYABLE_PASS=${a||b}\n`); console.log(`RUNDEMO_PASS=${a}\nTHOTDEMO_PASS=${b}\nANY_PLAYABLE_PASS=${a||b}`); process.exit(a||b?0:2);
+          (async()=>{
+            const browser=await chromium.launch({headless:true,args:['--disable-dev-shm-usage','--enable-webgl','--enable-unsafe-swiftshader','--ignore-gpu-blocklist']});
+            const a=await lane(browser,'RUNDEMO.EXE','rundemo');
+            const b=await lane(browser,'THOTDEMO.exe','thotdemo');
+            await browser.close();
+            fs.writeFileSync(process.env.GITHUB_WORKSPACE+'/report/final.env',`RUNDEMO_PASS=${a}\nTHOTDEMO_PASS=${b}\nANY_PLAYABLE_PASS=${a||b}\n`);
+            console.log(`RUNDEMO_PASS=${a}\nTHOTDEMO_PASS=${b}\nANY_PLAYABLE_PASS=${a||b}`);
+            process.exit(a||b?0:2);
           })().catch(e=>{console.error(e);process.exit(3)});
           NODE
           set +e
@@ -163,6 +172,6 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: hotd1997-modern-boxedwine-proof-report
+          name: hotd1997-official-26r1-wine6-proof-report
           path: report
           retention-days: 30
