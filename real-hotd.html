@@ -5,56 +5,41 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="theme-color" content="#05070a">
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-  <title>REAL HOTD · Browser Runtime</title>
+  <title>REAL HOTD · Play Now</title>
   <style>
-    :root{color-scheme:dark;--bg:#05070a;--panel:#0d1117;--line:#29313d;--hot:#ff2d3f;--text:#eef3f8;--muted:#91a0af;--ok:#66e3a4}
-    *{box-sizing:border-box} body{margin:0;background:radial-gradient(circle at 50% -10%,#271018 0,#090c11 36%,#05070a 75%);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-height:100vh}
-    .page{width:min(1180px,94vw);margin:0 auto;padding:24px 0 40px}.top{display:flex;gap:18px;align-items:center;justify-content:space-between;margin-bottom:18px}.eyebrow{margin:0;color:var(--hot);font:800 11px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.13em}.top h1{font-size:clamp(28px,5vw,60px);line-height:.92;margin:7px 0 0;letter-spacing:-.055em}.top h1 span{color:var(--hot)}
-    a,button{font:800 12px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.06em}.back,.open{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;border:1px solid var(--line);background:#10151c;color:var(--text);padding:12px 15px;border-radius:8px}.open{background:var(--hot);border-color:var(--hot);color:white}.proof{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 18px}.chip{border:1px solid #244c3a;background:#0b241a;color:var(--ok);padding:9px 11px;border-radius:999px;font:800 11px/1 ui-monospace,SFMono-Regular,Menlo,monospace}.chip.dim{border-color:var(--line);background:#0c1117;color:var(--muted)}
-    .cabinet{border:1px solid var(--line);background:#080b10;border-radius:14px;overflow:hidden;box-shadow:0 24px 80px #0008}.bar{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:12px 14px;border-bottom:1px solid var(--line);background:#0e131a}.status{display:flex;align-items:center;gap:9px;font:800 11px/1 ui-monospace,SFMono-Regular,Menlo,monospace}.lamp{width:9px;height:9px;border-radius:50%;background:var(--ok);box-shadow:0 0 18px var(--ok)}
-    .screen{position:relative;background:#000;min-height:560px}.screen iframe{display:block;width:100%;height:min(73vh,760px);min-height:560px;border:0;background:#000}.fallback{position:absolute;inset:auto 18px 18px;display:flex;justify-content:flex-end;pointer-events:none}.fallback a{pointer-events:auto;box-shadow:0 8px 28px #000c}
-    .how{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}.step{border:1px solid var(--line);background:var(--panel);padding:15px;border-radius:10px}.step b{display:block;color:var(--hot);font:900 11px/1 ui-monospace,SFMono-Regular,Menlo,monospace;margin-bottom:8px}.step p{margin:0;color:#c8d1da;font-size:13px;line-height:1.45}.note{color:var(--muted);font-size:12px;line-height:1.5;margin:14px 2px 0}.note strong{color:#d9e1e8}.mobile{display:none}
-    @media(max-width:760px){.page{width:100%;padding:14px}.top{align-items:flex-start}.top h1{font-size:38px}.back{padding:10px}.how{grid-template-columns:1fr}.screen,.screen iframe{min-height:510px;height:68vh}.mobile{display:block;border:1px solid #705b23;background:#241f0d;color:#f5db76;padding:11px 13px;border-radius:8px;margin-bottom:12px;font-size:12px;line-height:1.45}}
+    :root{color-scheme:dark;--bg:#05070a;--panel:#0d1117;--line:#29313d;--hot:#ff2d3f;--x:#107c10;--text:#eef3f8;--muted:#91a0af;--ok:#66e3a4}
+    *{box-sizing:border-box}body{margin:0;background:radial-gradient(circle at 50% -10%,#271018 0,#090c11 36%,#05070a 75%);color:var(--text);font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;min-height:100vh}.page{width:min(980px,94vw);margin:0 auto;padding:24px 0 48px}.top{display:flex;gap:18px;align-items:center;justify-content:space-between;margin-bottom:18px}.eyebrow{margin:0;color:var(--hot);font:800 11px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.13em}.top h1{font-size:clamp(34px,7vw,72px);line-height:.92;margin:7px 0 0;letter-spacing:-.055em}.top h1 span{color:var(--hot)}a{font:800 12px/1 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.05em}.back,.btn{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;border:1px solid var(--line);background:#10151c;color:var(--text);padding:13px 16px;border-radius:9px}.hero{border:1px solid var(--line);background:linear-gradient(180deg,#10161e,#090d12);border-radius:16px;padding:clamp(22px,5vw,48px);box-shadow:0 24px 80px #0009}.live{display:inline-flex;gap:9px;align-items:center;color:var(--ok);font:900 11px/1 ui-monospace,SFMono-Regular,Menlo,monospace;margin-bottom:16px}.lamp{width:9px;height:9px;border-radius:50%;background:var(--ok);box-shadow:0 0 18px var(--ok)}.hero h2{font-size:clamp(28px,6vw,56px);line-height:.96;margin:0 0 14px;letter-spacing:-.04em}.hero p{color:#c8d1da;font-size:15px;line-height:1.55;margin:0 0 22px;max-width:760px}.play{display:flex;gap:10px;flex-wrap:wrap}.btn.primary{background:var(--x);border-color:#25a625;color:#fff;font-size:14px;padding:17px 22px}.btn.secondary{background:var(--hot);border-color:var(--hot);color:#fff}.req{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:16px}.card{border:1px solid var(--line);background:var(--panel);padding:15px;border-radius:10px}.card b{display:block;color:var(--hot);font:900 11px/1 ui-monospace,SFMono-Regular,Menlo,monospace;margin-bottom:8px}.card p{margin:0;color:#c8d1da;font-size:13px;line-height:1.45}.proof{margin-top:18px;border-top:1px solid var(--line);padding-top:18px;color:var(--muted);font-size:12px;line-height:1.5}.chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.chip{border:1px solid #244c3a;background:#0b241a;color:var(--ok);padding:8px 10px;border-radius:999px;font:800 10px/1 ui-monospace,SFMono-Regular,Menlo,monospace}.note{color:var(--muted);font-size:12px;line-height:1.5;margin:14px 2px 0}@media(max-width:720px){.page{width:100%;padding:14px}.top{align-items:flex-start}.top h1{font-size:44px}.back{padding:10px}.hero{padding:22px 16px}.btn.primary,.btn.secondary{width:100%;font-size:13px}.req{grid-template-columns:1fr}}
   </style>
 </head>
 <body>
   <main class="page">
     <header class="top">
-      <div>
-        <p class="eyebrow">REAL EXECUTABLE · LOCAL COPY · BOXEDWINE 26R1 / WINE 6</p>
-        <h1>REAL <span>HOTD</span></h1>
-      </div>
+      <div><p class="eyebrow">NO LOCAL FILES · OFFICIAL CLOUD ROUTE</p><h1>REAL <span>HOTD</span></h1></div>
       <a class="back" href="./">← WEB ARCADE</a>
     </header>
 
-    <div class="proof">
-      <span class="chip">RUNDEMO PASS</span>
-      <span class="chip">THOTDEMO PASS</span>
-      <span class="chip">0 PAGE ERRORS</span>
-      <span class="chip">CRASH SIGNATURE FALSE</span>
-      <span class="chip dim">RUN 33464731479</span>
-    </div>
-
-    <div class="mobile"><strong>Mobile note:</strong> the executable proof was done in desktop Chromium. The runtime may open on mobile, but importing a local game directory is much easier on desktop.</div>
-
-    <section class="cabinet">
-      <div class="bar">
-        <div class="status"><span class="lamp"></span> OFFICIAL BOXEDWINE ENGINE</div>
-        <a class="open" href="https://boxedwine.org/v/26R1/wine6/st/boxedwine.html?auto=false&resolution=640x480&bpp=16&sound=true&disableHideCursor=true" target="_blank" rel="noreferrer">OPEN ENGINE ↗</a>
+    <section class="hero">
+      <div class="live"><span class="lamp"></span> OFFICIAL XBOX CLOUD PATH</div>
+      <h2>PLAY THE REAL REMAKE NOW</h2>
+      <p>No local HOTD files are needed on your phone or PC. Microsoft lists THE HOUSE OF THE DEAD: Remake as cloud-playable. The game itself must be purchased, and cloud play requires an eligible Xbox Game Pass tier.</p>
+      <div class="play">
+        <a class="btn primary" href="https://www.xbox.com/en-US/games/store/the-house-of-the-dead-remake/9NCRZW5L1N9M" target="_blank" rel="noreferrer">▶ OPEN XBOX · BUY / PLAY</a>
+        <a class="btn secondary" href="https://boxedwine.org/v/26R1/wine6/st/boxedwine.html?auto=false&resolution=640x480&bpp=16&sound=true&disableHideCursor=true" target="_blank" rel="noreferrer">LOCAL 1997 BROWSER ENGINE ↗</a>
       </div>
-      <div class="screen">
-        <iframe title="Official BoxedWine Wine 6 browser runtime" allow="fullscreen; autoplay" referrerpolicy="no-referrer" src="https://boxedwine.org/v/26R1/wine6/st/boxedwine.html?auto=false&resolution=640x480&bpp=16&sound=true&disableHideCursor=true"></iframe>
-        <div class="fallback"><a class="open" href="https://boxedwine.org/v/26R1/wine6/st/boxedwine.html?auto=false&resolution=640x480&bpp=16&sound=true&disableHideCursor=true" target="_blank" rel="noreferrer">IF FRAME IS BLOCKED — OPEN DIRECTLY ↗</a></div>
+
+      <section class="req" aria-label="What you need">
+        <div class="card"><b>01 · SIGN IN</b><p>Open the Xbox button and sign in with your Microsoft/Xbox account.</p></div>
+        <div class="card"><b>02 · ENTITLEMENT</b><p>If you do not own the game, purchase it on the official Xbox page. Microsoft currently marks the title as “Game purchase required.”</p></div>
+        <div class="card"><b>03 · CLOUD PLAY</b><p>Use Xbox Cloud Gaming with an eligible Game Pass Essential, Premium or Ultimate subscription.</p></div>
+      </section>
+
+      <div class="proof">
+        Our separate 1997 browser-runtime experiment remains proven as a technical path, but it cannot supply copyrighted game files to you. The official cloud route above is the zero-local-files path.
+        <div class="chips"><span class="chip">RUNDEMO PASS</span><span class="chip">THOTDEMO PASS</span><span class="chip">0 PAGE ERRORS</span><span class="chip">CRASH FALSE</span></div>
       </div>
     </section>
 
-    <section class="how" aria-label="How to launch local HOTD">
-      <div class="step"><b>01 · LOCAL COPY</b><p>Use your own extracted <code>hotd_demo</code> directory containing <code>RUNDEMO.EXE</code> and <code>THOTDEMO.exe</code>. Nothing is uploaded to this GitHub repository.</p></div>
-      <div class="step"><b>02 · DROP IT</b><p>With the engine set to manual start, drag the local directory into the BoxedWine window. BoxedWine will enumerate executable files from the dropped directory.</p></div>
-      <div class="step"><b>03 · PLAY</b><p>Choose <code>RUNDEMO.EXE</code> first. Direct <code>THOTDEMO.exe</code> is also proven GREEN. Use mouse for the gun and the game’s normal keyboard controls.</p></div>
-    </section>
-
-    <p class="note"><strong>Why local?</strong> The browser execution path is proven, but this launcher intentionally does not host or mirror HOTD game files. It supplies only the launch path; the game body stays on your device.</p>
+    <p class="note">On iPhone, tap the Xbox button above in Safari and continue through Microsoft's sign-in/purchase/cloud flow. Region pricing and availability can differ.</p>
   </main>
 </body>
 </html>
