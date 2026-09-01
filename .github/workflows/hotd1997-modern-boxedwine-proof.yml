@@ -68,7 +68,7 @@ jobs:
           make release > "$GITHUB_WORKSPACE/report/build.log" 2>&1
           OUT=Build/Release
           test -s "$OUT/boxedwine.html" && test -s "$OUT/boxedwine.js" && test -s "$OUT/boxedwine.wasm"
-          cp "$OUT"/* "$GITHUB_WORKSPACE/site/"
+          cp -a "$OUT"/. "$GITHUB_WORKSPACE/site/"
           sha256sum "$OUT/boxedwine.html" "$OUT/boxedwine.js" "$OUT/boxedwine.wasm" | tee "$GITHUB_WORKSPACE/report/runtime-sha256.txt"
           echo MODERN_WEB_RUNTIME_BUILD_PASS=true | tee "$GITHUB_WORKSPACE/report/build-gate.env"
 
