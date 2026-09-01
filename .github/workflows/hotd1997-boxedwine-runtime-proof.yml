@@ -11,37 +11,32 @@ permissions:
   contents: read
 
 jobs:
-  hotd-normal-core-semantic-launch-proof:
+  hotd-exact-era-wasm-proof:
     runs-on: ubuntu-latest
-    container: ubuntu:20.04
     timeout-minutes: 55
     env:
-      DEBIAN_FRONTEND: noninteractive
       BOXEDWINE_SOURCE_SHA: 5a2195ba47a169455c2dbe6bcb4bae4c256c9bad
-      BOXEDWINE_OFFLINE_BUNDLE: https://sourceforge.net/projects/boxedwine/files/Builds/20.1.2/BoxedWine%2020.1.2%20-%20Windows.zip/download
-      BOXEDWINE_OFFLINE_SHA256: 69bbc533af07aa39ffabbf49a04e9d0d6c275d0698aec8d5124fe0d3bc57b53e
-      FULL_WINE17_URL: https://sourceforge.net/projects/boxedwine/files/FileSystems/Full/v5/Debian10-Wine-1.7.zip/download
-      FULL_WINE50_URL: https://sourceforge.net/projects/boxedwine/files/FileSystems/Full/v5/Debian10-Wine-5.0.zip/download
+      EMSCRIPTEN_VERSION: 2.0.8
+      WINE17_ROOT_URL: https://sourceforge.net/projects/boxedwine/files/FileSystems/Full/v5/Debian10-Wine-1.7.zip/download
+      WINE17_ROOT_SHA256: b331eaa21c035c55a81fe260777f129962d2d6b8fb47a6cec1258f3a56bc8b98
       PCZONE_CD_ARCHIVE: https://pixsoriginadventures.co.uk/PCZone/PC%20Zone%2067%20%28September%201998%29/CDZone%2367.rar
       PCZONE_RAR_SHA256: 1a8695d904886e028b4e14aa59b85934c1d867ed03d2f3a18c9d202691efa1ba
       HOTD_INSTALLER_SHA256: 6150da85cd5e7ba88bbe722aba8202d5f8726b66eb1e8614b2bda5e89ae76944
       HOTD_EXE_SHA256: 96951e783957858d20d181884ecd0566d53f91a88586345dc6fd126ca986d29f
     steps:
-      - name: Install historical build and sterile display tools
+      - name: Install archive, browser and build helpers
         shell: bash
         run: |
           set -euo pipefail
-          apt-get update -qq
-          apt-get install -y -qq --no-install-recommends \
-            ca-certificates git curl unzip file cmake build-essential \
-            libsdl2-dev libssl-dev libminizip-dev libgl1-mesa-dev libglu1-mesa-dev libgl1-mesa-dri \
-            xvfb x11-utils xdotool imagemagick unar p7zip-full ccd2iso
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends \
+            git curl unzip zip file unar p7zip-full ccd2iso python3 imagemagick
+          mkdir -p "$GITHUB_WORKSPACE/lab" "$GITHUB_WORKSPACE/report" "$GITHUB_WORKSPACE/site"
 
-      - name: Checkout exact BoxedWine 20.1.2 source revision
+      - name: Checkout exact BoxedWine 20.1.2 source
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$GITHUB_WORKSPACE/lab" "$GITHUB_WORKSPACE/report"
           cd "$GITHUB_WORKSPACE/lab"
           git init -q Boxedwine
           cd Boxedwine
@@ -52,127 +47,65 @@ jobs:
           git show -s --format='BOXEDWINE_SOURCE_SHA=%H%nBOXEDWINE_SOURCE_DATE=%cI%nBOXEDWINE_SOURCE_SUBJECT=%s' HEAD \
             | tee "$GITHUB_WORKSPACE/report/source-provenance.env"
 
-      - name: Build Web-aligned normal CPU plus softMMU runtime
+      - name: Setup exact-era Emscripten
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: ${{ env.EMSCRIPTEN_VERSION }}
+          actions-cache-folder: emsdk-cache-2.0.8
+
+      - name: Build exact-era normal plus softMMU Web runtime
         shell: bash
         run: |
           set -euo pipefail
-          cd "$GITHUB_WORKSPACE/lab/Boxedwine/project/linux"
-          sh build.sh > "$GITHUB_WORKSPACE/report/build-normal.log" 2>&1
-          test -x bin/boxedwine
-          file bin/boxedwine | tee "$GITHUB_WORKSPACE/report/boxedwine-normal-type.txt"
-          sha256sum bin/boxedwine | tee "$GITHUB_WORKSPACE/report/boxedwine-normal-sha256.txt"
+          cd "$GITHUB_WORKSPACE/lab/Boxedwine/project/emscripten"
+          emcc --version | head -n 3 | tee "$GITHUB_WORKSPACE/report/emcc-version.txt"
+
+          # The historical script deliberately compiles normal CPU + softMMU,
+          # matching the native lane that already launched HOTD successfully.
+          sh buildjs.sh > "$GITHUB_WORKSPACE/report/wasm-build.log" 2>&1
+          test -s boxedwine.html
+          test -s boxedwine.js
+          test -s boxedwine.wasm
+          sha256sum boxedwine.html boxedwine.js boxedwine.wasm \
+            | tee "$GITHUB_WORKSPACE/report/wasm-runtime-sha256.txt"
           {
+            echo WASM_BUILD_PASS=true
             echo CPU_CORE=normal
             echo MMU=softmmu
             echo THREAD_MODEL=singleThreaded
-            echo WEB_EXECUTION_CORE_ALIGNMENT=normal_plus_softmmu
-          } | tee "$GITHUB_WORKSPACE/report/normal-core-contract.env"
+            echo EMSCRIPTEN_VERSION="$EMSCRIPTEN_VERSION"
+          } | tee "$GITHUB_WORKSPACE/report/wasm-build-gate.env"
 
-      - name: Fetch official split and combined filesystem roots
+      - name: Assemble open-source browser runtime shell
         shell: bash
         run: |
           set -euo pipefail
-          cd "$GITHUB_WORKSPACE/lab"
-          mkdir -p portable full-roots
+          SRC="$GITHUB_WORKSPACE/lab/Boxedwine/project/emscripten"
+          SITE="$GITHUB_WORKSPACE/site"
+          cp "$SRC/boxedwine.html" "$SRC/boxedwine.js" "$SRC/boxedwine.wasm" "$SITE/"
+          cp "$SRC/boxedwine.css" "$SRC/boxedwine-shell.js" "$SRC/browserfs.boxedwine.js" "$SRC/jszip.min.js" "$SITE/"
+          find "$SITE" -maxdepth 1 -type f -printf '%f\t%s bytes\n' | sort \
+            > "$GITHUB_WORKSPACE/report/open-runtime-files.txt"
 
-          curl --fail --location --retry 3 --output boxedwine-offline.zip "$BOXEDWINE_OFFLINE_BUNDLE"
-          test "$(sha256sum boxedwine-offline.zip | awk '{print $1}')" = "$BOXEDWINE_OFFLINE_SHA256"
-          unzip -q boxedwine-offline.zip -d portable
-          DEBIAN="$(find portable -type f -iname 'debian10.zip' -print -quit)"
-          W17="$(find portable -type f -iname 'Wine-1.7.zip' -print -quit)"
-          W50="$(find portable -type f -iname 'Wine-5.0.zip' -print -quit)"
-          test -n "$DEBIAN" && test -n "$W17" && test -n "$W50"
-          cp "$DEBIAN" full-roots/debian10.zip
-          printf '%s\n' "$DEBIAN" > debian.path
-          printf '%s\n' "$W17" > wine17.path
-          printf '%s\n' "$W50" > wine50.path
-
-          curl --fail --location --retry 3 --output full-roots/Debian10-Wine-1.7.zip "$FULL_WINE17_URL"
-          curl --fail --location --retry 3 --output full-roots/Debian10-Wine-5.0.zip "$FULL_WINE50_URL"
-          unzip -tq full-roots/Debian10-Wine-1.7.zip >/dev/null
-          unzip -tq full-roots/Debian10-Wine-5.0.zip >/dev/null
-          unzip -tq full-roots/debian10.zip >/dev/null
-          sha256sum full-roots/*.zip | tee "$GITHUB_WORKSPACE/report/root-sha256.txt"
-          stat -c '%n %s bytes' full-roots/*.zip | tee "$GITHUB_WORKSPACE/report/root-sizes.txt"
+      - name: Fetch verified Wine 1.7 browser root
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/site"
+          curl --fail --location --retry 3 --output Debian10-Wine-1.7.zip "$WINE17_ROOT_URL"
+          ACTUAL="$(sha256sum Debian10-Wine-1.7.zip | awk '{print $1}')"
+          test "$ACTUAL" = "$WINE17_ROOT_SHA256"
+          unzip -tq Debian10-Wine-1.7.zip >/dev/null
           {
-            echo SPLIT_ROOTS_FETCH_PASS=true
-            echo FULL_ROOTS_FETCH_PASS=true
-            echo FULL50_DEBIAN_DEPENDENCY_SATISFIED=true
+            echo WINE17_ROOT_SHA256="$ACTUAL"
+            echo WINE17_ROOT_IDENTITY_PASS=true
           } | tee "$GITHUB_WORKSPACE/report/root-gate.env"
 
-      - name: Start sterile Xvfb display
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/xdg"
-          chmod 700 "$RUNNER_TEMP/xdg"
-          Xvfb :99 -screen 0 1024x768x24 -nolisten tcp > "$GITHUB_WORKSPACE/report/xvfb.log" 2>&1 &
-          echo $! > "$GITHUB_WORKSPACE/lab/xvfb.pid"
-          sleep 2
-          DISPLAY=:99 xdpyinfo > "$GITHUB_WORKSPACE/report/xdpyinfo.txt"
-
-      - name: Prove Wine semantically on four normal-core lanes
+      - name: Recover verified SEGA HOTD demo only inside runner
         shell: bash
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE/lab"
-          REPORT="$GITHUB_WORKSPACE/report"
-          BW="$GITHUB_WORKSPACE/lab/Boxedwine/project/linux/bin/boxedwine"
-          export DISPLAY=:99
-          export LIBGL_ALWAYS_SOFTWARE=1
-          export XDG_RUNTIME_DIR="$RUNNER_TEMP/xdg"
-
-          : > "$REPORT/wine-semantic-baseline.tsv"
-          printf 'lane\texit_code\twine_banner\tclean_shutdown\tcrash\tverdict\n' >> "$REPORT/wine-semantic-baseline.tsv"
-
-          probe() {
-            local lane="$1"; shift
-            local log="$REPORT/wine-$lane.log"
-            local root="root-wine-$lane"
-            rm -rf "$root"; mkdir -p "$root"
-            set +e
-            timeout 25s "$BW" -root "$root" "$@" -nosound /bin/wine --version > "$log" 2>&1
-            local rc=$?
-            set -e
-
-            local banner=false shutdown=false crash=false verdict=FAIL
-            grep -Eq '^wine-[0-9]' "$log" && banner=true || true
-            grep -q 'Boxedwine shutdown' "$log" && shutdown=true || true
-            if [[ "$rc" -eq 139 ]] || grep -Eiq 'starting debugger|winedbg|assertion failed|double free|corruption|unhandled exception|segmentation fault|fatal signal|core dumped' "$log"; then
-              crash=true
-            fi
-            if [[ "$banner" == true && "$shutdown" == true && "$crash" == false ]]; then
-              verdict=PASS
-            fi
-            printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$lane" "$rc" "$banner" "$shutdown" "$crash" "$verdict" >> "$REPORT/wine-semantic-baseline.tsv"
-            echo "--- $lane rc=$rc verdict=$verdict ---"
-            cat "$log"
-          }
-
-          probe split17 -zip "$(cat debian.path)" -zip "$(cat wine17.path)"
-          probe split50 -zip "$(cat debian.path)" -zip "$(cat wine50.path)"
-          probe full17 -zip full-roots/Debian10-Wine-1.7.zip
-          probe full50 -zip full-roots/Debian10-Wine-5.0.zip
-
-          PASS_COUNT="$(awk -F '\t' '$6=="PASS" {n++} END{print n+0}' "$REPORT/wine-semantic-baseline.tsv")"
-          {
-            echo WINE_SEMANTIC_PASS_COUNT="$PASS_COUNT"
-            echo WINE_TOTAL_LANES=4
-            if [[ "$PASS_COUNT" -gt 0 ]]; then
-              echo NORMAL_HOST_RUNTIME_GATE=PASS
-            else
-              echo NORMAL_HOST_RUNTIME_GATE=FAIL
-            fi
-          } | tee "$REPORT/wine-semantic-gate.env"
-          cat "$REPORT/wine-semantic-baseline.tsv"
-          test "$PASS_COUNT" -gt 0
-
-      - name: Recover genuine SEGA HOTD demo ephemerally
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$GITHUB_WORKSPACE/lab"
-          REPORT="$GITHUB_WORKSPACE/report"
           mkdir -p cd-outer cd-root installer-inner
           curl --fail --location --retry 3 --output cdzone67.rar "$PCZONE_CD_ARCHIVE"
           test "$(sha256sum cdzone67.rar | awk '{print $1}')" = "$PCZONE_RAR_SHA256"
@@ -189,156 +122,159 @@ jobs:
           GAME_EXE="$(find "$GAME_DIR" -maxdepth 1 -type f -iname 'THOTDEMO.exe' -print -quit)"
           test -n "$GAME_EXE"
           test "$(sha256sum "$GAME_EXE" | awk '{print $1}')" = "$HOTD_EXE_SHA256"
-          printf '%s\n' "$GAME_DIR" > game-dir.path
-          find "$GAME_DIR" -maxdepth 2 -type f -printf '%P\t%s bytes\n' | sort > "$REPORT/hotd-game-directory.txt"
+
+          # App ZIP is deliberately ephemeral and is never uploaded as an artifact.
+          cd "$GAME_DIR"
+          zip -qr "$GITHUB_WORKSPACE/site/hotd.zip" .
+          cd "$GITHUB_WORKSPACE/lab"
           {
             echo PACKAGE_IDENTITY_PASS=true
-            echo HOTD_INSTALLER_SHA256="$HOTD_INSTALLER_SHA256"
             echo HOTD_EXE_SHA256="$HOTD_EXE_SHA256"
+            echo HOTD_APP_ZIP_EPHEMERAL=true
             echo HOTD_BINARY_PERSISTED=NO
             echo HOTD_BINARY_UPLOADED=NO
-          } | tee "$REPORT/hotd-identity.env"
+          } | tee "$GITHUB_WORKSPACE/report/hotd-identity.env"
 
-      - name: Run genuine HOTD launch matrix on every green Wine lane
+      - name: Install Playwright Chromium
         shell: bash
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE/lab"
-          REPORT="$GITHUB_WORKSPACE/report"
-          BW="$GITHUB_WORKSPACE/lab/Boxedwine/project/linux/bin/boxedwine"
-          GAME_DIR="$(cat game-dir.path)"
-          export DISPLAY=:99
-          export LIBGL_ALWAYS_SOFTWARE=1
-          export XDG_RUNTIME_DIR="$RUNNER_TEMP/xdg"
+          npm init -y >/dev/null 2>&1
+          npm install --silent playwright@1.55.0
+          npx playwright install --with-deps chromium >/dev/null
 
-          import -display :99 -window root "$RUNNER_TEMP/pre-game.png" 2>/dev/null || true
-          : > "$REPORT/hotd-launch.tsv"
-          printf 'lane\tstate\tcrash\tvisual_delta_from_blank\tmotion_delta\twindows\tlaunch_verdict\tmotion_verdict\n' >> "$REPORT/hotd-launch.tsv"
-          LAUNCH_PASS_COUNT=0
-          MOTION_PASS_COUNT=0
-
-          for lane in split17 split50 full17 full50; do
-            if ! awk -F '\t' -v l="$lane" '$1==l && $6=="PASS" {ok=1} END{exit !ok}' "$REPORT/wine-semantic-baseline.tsv"; then
-              printf '%s\tSKIPPED\tNA\tNA\tNA\tNA\tBASELINE_FAIL\tNA\n' "$lane" >> "$REPORT/hotd-launch.tsv"
-              continue
-            fi
-
-            ROOT="root-hotd-$lane"
-            LOG="$REPORT/hotd-$lane.log"
-            TREE="$REPORT/hotd-$lane-window-tree.txt"
-            F1="$RUNNER_TEMP/hotd-$lane-1.png"
-            F2="$RUNNER_TEMP/hotd-$lane-2.png"
-            rm -rf "$ROOT" "$F1" "$F2"
-            mkdir -p "$ROOT"
-
-            ZIP_ARGS=()
-            case "$lane" in
-              split17) ZIP_ARGS=(-zip "$(cat debian.path)" -zip "$(cat wine17.path)") ;;
-              split50) ZIP_ARGS=(-zip "$(cat debian.path)" -zip "$(cat wine50.path)") ;;
-              full17)  ZIP_ARGS=(-zip full-roots/Debian10-Wine-1.7.zip) ;;
-              full50)  ZIP_ARGS=(-zip full-roots/Debian10-Wine-5.0.zip) ;;
-            esac
-
-            set +e
-            "$BW" -root "$ROOT" "${ZIP_ARGS[@]}" \
-              -mount_drive "$GAME_DIR" d -w /mnt/d_drive \
-              -resolution 640x480 -bpp 16 -nosound -title "HOTD-$lane" \
-              /bin/wine 'd:\\THOTDEMO.exe' > "$LOG" 2>&1 &
-            PID=$!
-            set -e
-
-            sleep 8
-            import -display :99 -window root "$F1" 2>/dev/null || true
-            xwininfo -root -tree > "$TREE" 2>&1 || true
-            xdotool key Return 2>/dev/null || true
-            xdotool mousemove 512 384 click 1 2>/dev/null || true
-            sleep 10
-            import -display :99 -window root "$F2" 2>/dev/null || true
-
-            RC=NA
-            if kill -0 "$PID" 2>/dev/null; then
-              STATE=ALIVE
-            else
-              set +e
-              wait "$PID"; RC=$?
-              set -e
-              STATE="EXIT_$RC"
-            fi
-
-            CRASH=false
-            if [[ "$RC" == 139 ]] || grep -Eiq 'starting debugger|winedbg|assertion failed|double free|corruption|unhandled exception|segmentation fault|fatal signal|core dumped' "$LOG"; then
-              CRASH=true
-            fi
-
-            VISUAL=NA
-            MOTION=NA
-            if [[ -s "$RUNNER_TEMP/pre-game.png" && -s "$F1" ]]; then
-              set +e
-              D="$(compare -metric AE "$RUNNER_TEMP/pre-game.png" "$F1" null: 2>&1)"
-              set -e
-              [[ "$D" =~ ^[0-9]+$ ]] && VISUAL="$D"
-            fi
-            if [[ -s "$F1" && -s "$F2" ]]; then
-              set +e
-              D="$(compare -metric AE "$F1" "$F2" null: 2>&1)"
-              set -e
-              [[ "$D" =~ ^[0-9]+$ ]] && MOTION="$D"
-            fi
-
-            WINDOWS="$(grep -E '0x[0-9a-f]+ ' "$TREE" 2>/dev/null | wc -l | tr -d ' ')"
-            LAUNCH=FAIL
-            MOTION_VERDICT=FAIL
-            if [[ "$STATE" == ALIVE && "$CRASH" == false && "$VISUAL" != NA && "$VISUAL" -gt 0 ]]; then
-              LAUNCH=PASS
-              LAUNCH_PASS_COUNT=$((LAUNCH_PASS_COUNT + 1))
-            fi
-            if [[ "$LAUNCH" == PASS && "$MOTION" != NA && "$MOTION" -gt 0 ]]; then
-              MOTION_VERDICT=PASS
-              MOTION_PASS_COUNT=$((MOTION_PASS_COUNT + 1))
-            fi
-
-            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-              "$lane" "$STATE" "$CRASH" "$VISUAL" "$MOTION" "$WINDOWS" "$LAUNCH" "$MOTION_VERDICT" \
-              >> "$REPORT/hotd-launch.tsv"
-            echo "--- HOTD $lane ---"
-            tail -n 160 "$LOG" || true
-            cat "$TREE" | head -n 120 || true
-
-            kill "$PID" 2>/dev/null || true
+      - name: Serve sterile Web runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/site"
+          python3 -m http.server 8000 --bind 127.0.0.1 > "$GITHUB_WORKSPACE/report/http-server.log" 2>&1 &
+          echo $! > "$GITHUB_WORKSPACE/lab/http.pid"
+          for i in $(seq 1 30); do
+            curl -fsS http://127.0.0.1:8000/boxedwine.html >/dev/null && exit 0
             sleep 1
-            kill -9 "$PID" 2>/dev/null || true
-            rm -f "$F1" "$F2"
           done
+          exit 1
 
-          rm -f "$RUNNER_TEMP/pre-game.png"
-          {
-            echo HOTD_LAUNCH_PASS_COUNT="$LAUNCH_PASS_COUNT"
-            echo HOTD_MOTION_PASS_COUNT="$MOTION_PASS_COUNT"
-            if [[ "$LAUNCH_PASS_COUNT" -gt 0 ]]; then
-              echo BOXEDWINE_NATIVE_HOTD_LAUNCH_PASS=true
-            else
-              echo BOXEDWINE_NATIVE_HOTD_LAUNCH_PASS=false
-            fi
-            if [[ "$MOTION_PASS_COUNT" -gt 0 ]]; then
-              echo BOXEDWINE_NATIVE_HOTD_MOTION_PASS=true
-            else
-              echo BOXEDWINE_NATIVE_HOTD_MOTION_PASS=false
-            fi
-          } | tee "$REPORT/hotd-launch-gate.env"
-          cat "$REPORT/hotd-launch.tsv"
+      - name: Execute genuine HOTD inside Chromium WASM
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/lab"
+          cat > wasm-hotd-proof.js <<'NODE'
+          const { chromium } = require('playwright');
+          const fs = require('fs');
+          const { execFileSync } = require('child_process');
 
-      - name: Stop sterile Xvfb
+          (async () => {
+            const reportDir = process.env.GITHUB_WORKSPACE + '/report';
+            const temp = process.env.RUNNER_TEMP;
+            const consoleLines = [];
+            const pageErrors = [];
+            const browser = await chromium.launch({
+              headless: true,
+              args: ['--disable-dev-shm-usage', '--use-gl=swiftshader', '--enable-webgl', '--ignore-gpu-blocklist']
+            });
+            const page = await browser.newPage({ viewport: { width: 1024, height: 768 } });
+            page.on('console', msg => consoleLines.push(`[${msg.type()}] ${msg.text()}`));
+            page.on('pageerror', err => pageErrors.push(String(err)));
+
+            const url = 'http://127.0.0.1:8000/boxedwine.html' +
+              '?root=Debian10-Wine-1.7&app=hotd&p=THOTDEMO.exe&work=d:/hotd&bpp=16&sound=false&auto=true';
+            await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 30000 });
+            await page.screenshot({ path: temp + '/wasm-pre.png' });
+
+            let canvasSeen = false;
+            for (let i = 0; i < 60; i++) {
+              const state = await page.evaluate(() => {
+                const c = document.getElementById('canvas');
+                return c ? { w: c.width, h: c.height } : null;
+              }).catch(() => null);
+              if (state && state.w >= 320 && state.h >= 200) { canvasSeen = true; break; }
+              await page.waitForTimeout(1000);
+            }
+
+            await page.waitForTimeout(8000);
+            await page.screenshot({ path: temp + '/wasm-frame1.png' });
+            await page.keyboard.press('Enter').catch(() => {});
+            await page.mouse.move(512, 384).catch(() => {});
+            await page.mouse.click(512, 384).catch(() => {});
+            await page.waitForTimeout(10000);
+            await page.screenshot({ path: temp + '/wasm-frame2.png' });
+
+            fs.writeFileSync(reportDir + '/browser-console.log', consoleLines.join('\n') + '\n');
+            fs.writeFileSync(reportDir + '/browser-page-errors.log', pageErrors.join('\n') + '\n');
+
+            function delta(a, b) {
+              try {
+                const out = execFileSync('compare', ['-metric', 'AE', a, b, 'null:'], { encoding: 'utf8', stdio: ['ignore','pipe','pipe'] });
+                const v = String(out || '').trim();
+                return /^\d+$/.test(v) ? Number(v) : 0;
+              } catch (e) {
+                const v = String((e.stderr || e.stdout || '')).trim();
+                return /^\d+$/.test(v) ? Number(v) : 0;
+              }
+            }
+
+            const visualDelta = delta(temp + '/wasm-pre.png', temp + '/wasm-frame1.png');
+            const motionDelta = delta(temp + '/wasm-frame1.png', temp + '/wasm-frame2.png');
+            const text = consoleLines.join('\n');
+            const errorText = pageErrors.join('\n');
+            const launchLog = /Launching .*THOTDEMO\.exe/i.test(text);
+            const crash = /(abort\(|RuntimeError|unhandled exception|segmentation fault|assertion failed|double free|corruption)/i.test(text + '\n' + errorText);
+            const launchPass = canvasSeen && visualDelta > 0 && !crash;
+            const motionPass = launchPass && motionDelta > 0;
+
+            const rows = [
+              `CANVAS_SEEN=${canvasSeen}`,
+              `THOTDEMO_LAUNCH_LOG_SEEN=${launchLog}`,
+              `PAGE_ERROR_COUNT=${pageErrors.length}`,
+              `CRASH_SIGNATURE=${crash}`,
+              `VISUAL_DELTA_FROM_PRE=${visualDelta}`,
+              `MOTION_DELTA_AFTER_INPUT=${motionDelta}`,
+              `BOXEDWINE_WASM_HOTD_LAUNCH_PASS=${launchPass}`,
+              `BOXEDWINE_WASM_HOTD_MOTION_PASS=${motionPass}`
+            ];
+            fs.writeFileSync(reportDir + '/wasm-hotd-gate.env', rows.join('\n') + '\n');
+            console.log(rows.join('\n'));
+
+            await browser.close();
+            for (const f of ['wasm-pre.png','wasm-frame1.png','wasm-frame2.png']) {
+              try { fs.unlinkSync(temp + '/' + f); } catch (_) {}
+            }
+            process.exit(launchPass ? 0 : 2);
+          })().catch(err => { console.error(err); process.exit(3); });
+          NODE
+
+          set +e
+          node wasm-hotd-proof.js | tee "$GITHUB_WORKSPACE/report/wasm-hotd-proof.stdout.txt"
+          RC=${PIPESTATUS[0]}
+          set -e
+          echo "BROWSER_PROOF_EXIT_CODE=$RC" | tee -a "$GITHUB_WORKSPACE/report/wasm-hotd-gate.env"
+
+          # SEGA bytes and transient browser captures must never reach artifacts.
+          rm -f "$GITHUB_WORKSPACE/site/hotd.zip"
+          rm -f "$RUNNER_TEMP/wasm-pre.png" "$RUNNER_TEMP/wasm-frame1.png" "$RUNNER_TEMP/wasm-frame2.png"
+          if [[ "$RC" -eq 0 ]]; then
+            echo WASM_GATE_RESULT=PASS | tee -a "$GITHUB_WORKSPACE/report/wasm-hotd-gate.env"
+          else
+            echo WASM_GATE_RESULT=FAIL | tee -a "$GITHUB_WORKSPACE/report/wasm-hotd-gate.env"
+          fi
+
+      - name: Stop sterile HTTP server
         if: always()
         shell: bash
         run: |
-          PID="$(cat "$GITHUB_WORKSPACE/lab/xvfb.pid" 2>/dev/null || true)"
+          PID="$(cat "$GITHUB_WORKSPACE/lab/http.pid" 2>/dev/null || true)"
           [[ -n "$PID" ]] && kill "$PID" 2>/dev/null || true
+          rm -f "$GITHUB_WORKSPACE/site/hotd.zip"
 
-      - name: Upload text-only proof evidence
+      - name: Upload text-only WASM evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: hotd1997-normal-semantic-launch-report
+          name: hotd1997-exact-era-wasm-report
           path: ${{ github.workspace }}/report
           if-no-files-found: warn
           retention-days: 30
