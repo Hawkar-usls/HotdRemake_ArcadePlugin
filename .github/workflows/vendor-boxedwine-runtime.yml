@@ -1,0 +1,64 @@
+name: Vendor BoxedWine 26R1 Web Runtime
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/vendor-boxedwine-runtime.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  vendor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      BOXEDWINE_BASE: https://boxedwine.org/v/26R1/wine6/st
+      BOXEDWINE_SOURCE_SHA: 2473488cfcf1ba914daf5aad097da0c59bb16073
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fetch official runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf runtime/boxedwine
+          mkdir -p runtime/boxedwine
+          cd runtime/boxedwine
+          curl -fL --retry 3 -o boxedwine.html "$BOXEDWINE_BASE/boxedwine.html"
+          curl -fL --retry 3 -o boxedwine.zip "$BOXEDWINE_BASE/boxedwine.zip"
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          s=Path('boxedwine.html').read_text(errors='replace')
+          refs=[]
+          for pat in (r'<script[^>]+src=["\']([^"\']+)', r'<link[^>]+href=["\']([^"\']+)'):
+              refs += re.findall(pat,s,re.I)
+          refs += ['boxedwine.js','boxedwine.wasm']
+          keep=[]
+          for x in refs:
+              x=x.split('?',1)[0]
+              if not x or '://' in x or x.startswith('/') or x.startswith('data:'): continue
+              if x not in keep: keep.append(x)
+          Path('assets.txt').write_text('\n'.join(keep)+'\n')
+          PY
+          while IFS= read -r f; do
+            [ -n "$f" ] || continue
+            mkdir -p "$(dirname "$f")"
+            curl -fL --retry 3 -o "$f" "$BOXEDWINE_BASE/$f"
+          done < assets.txt
+          rm assets.txt
+          test "$(stat -c %s boxedwine.zip)" -lt 95000000
+          printf 'BoxedWine 26R1 Web/Wine6 runtime\nUpstream: https://github.com/danoon2/Boxedwine\nSource commit: %s\nLicense: GPL-2.0\nNo HOTD game data is included in this directory.\n' "$BOXEDWINE_SOURCE_SHA" > UPSTREAM.txt
+          curl -fL --retry 3 -o UPSTREAM_README.md "https://raw.githubusercontent.com/danoon2/Boxedwine/$BOXEDWINE_SOURCE_SHA/README.md"
+      - name: Commit runtime only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add runtime/boxedwine
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m 'Vendor BoxedWine 26R1 web runtime'
+          git push
