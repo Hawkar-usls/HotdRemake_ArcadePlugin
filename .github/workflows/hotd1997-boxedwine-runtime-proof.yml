@@ -11,13 +11,15 @@ permissions:
   contents: read
 
 jobs:
-  hotd-normal-core-web-aligned-proof:
+  hotd-normal-core-semantic-launch-proof:
     runs-on: ubuntu-latest
     container: ubuntu:20.04
-    timeout-minutes: 50
+    timeout-minutes: 55
     env:
       DEBIAN_FRONTEND: noninteractive
       BOXEDWINE_SOURCE_SHA: 5a2195ba47a169455c2dbe6bcb4bae4c256c9bad
+      BOXEDWINE_OFFLINE_BUNDLE: https://sourceforge.net/projects/boxedwine/files/Builds/20.1.2/BoxedWine%2020.1.2%20-%20Windows.zip/download
+      BOXEDWINE_OFFLINE_SHA256: 69bbc533af07aa39ffabbf49a04e9d0d6c275d0698aec8d5124fe0d3bc57b53e
       FULL_WINE17_URL: https://sourceforge.net/projects/boxedwine/files/FileSystems/Full/v5/Debian10-Wine-1.7.zip/download
       FULL_WINE50_URL: https://sourceforge.net/projects/boxedwine/files/FileSystems/Full/v5/Debian10-Wine-5.0.zip/download
       PCZONE_CD_ARCHIVE: https://pixsoriginadventures.co.uk/PCZone/PC%20Zone%2067%20%28September%201998%29/CDZone%2367.rar
@@ -25,15 +27,15 @@ jobs:
       HOTD_INSTALLER_SHA256: 6150da85cd5e7ba88bbe722aba8202d5f8726b66eb1e8614b2bda5e89ae76944
       HOTD_EXE_SHA256: 96951e783957858d20d181884ecd0566d53f91a88586345dc6fd126ca986d29f
     steps:
-      - name: Install historical normal-core build and sterile execution tools
+      - name: Install historical build and sterile display tools
         shell: bash
         run: |
           set -euo pipefail
           apt-get update -qq
           apt-get install -y -qq --no-install-recommends \
-            ca-certificates git curl unzip file cmake build-essential gdb \
+            ca-certificates git curl unzip file cmake build-essential \
             libsdl2-dev libssl-dev libminizip-dev libgl1-mesa-dev libglu1-mesa-dev libgl1-mesa-dri \
-            xvfb x11-utils imagemagick unar p7zip-full ccd2iso
+            xvfb x11-utils xdotool imagemagick unar p7zip-full ccd2iso
 
       - name: Checkout exact BoxedWine 20.1.2 source revision
         shell: bash
@@ -66,20 +68,37 @@ jobs:
             echo WEB_EXECUTION_CORE_ALIGNMENT=normal_plus_softmmu
           } | tee "$GITHUB_WORKSPACE/report/normal-core-contract.env"
 
-      - name: Fetch official combined 20.1.2-era full roots
+      - name: Fetch official split and combined filesystem roots
         shell: bash
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE/lab"
-          mkdir -p full-roots
+          mkdir -p portable full-roots
+
+          curl --fail --location --retry 3 --output boxedwine-offline.zip "$BOXEDWINE_OFFLINE_BUNDLE"
+          test "$(sha256sum boxedwine-offline.zip | awk '{print $1}')" = "$BOXEDWINE_OFFLINE_SHA256"
+          unzip -q boxedwine-offline.zip -d portable
+          DEBIAN="$(find portable -type f -iname 'debian10.zip' -print -quit)"
+          W17="$(find portable -type f -iname 'Wine-1.7.zip' -print -quit)"
+          W50="$(find portable -type f -iname 'Wine-5.0.zip' -print -quit)"
+          test -n "$DEBIAN" && test -n "$W17" && test -n "$W50"
+          cp "$DEBIAN" full-roots/debian10.zip
+          printf '%s\n' "$DEBIAN" > debian.path
+          printf '%s\n' "$W17" > wine17.path
+          printf '%s\n' "$W50" > wine50.path
+
           curl --fail --location --retry 3 --output full-roots/Debian10-Wine-1.7.zip "$FULL_WINE17_URL"
           curl --fail --location --retry 3 --output full-roots/Debian10-Wine-5.0.zip "$FULL_WINE50_URL"
           unzip -tq full-roots/Debian10-Wine-1.7.zip >/dev/null
           unzip -tq full-roots/Debian10-Wine-5.0.zip >/dev/null
-          file full-roots/*.zip | tee "$GITHUB_WORKSPACE/report/full-root-types.txt"
-          sha256sum full-roots/*.zip | tee "$GITHUB_WORKSPACE/report/full-root-sha256.txt"
-          stat -c '%n %s bytes' full-roots/*.zip | tee "$GITHUB_WORKSPACE/report/full-root-sizes.txt"
-          echo FULL_ROOT_FETCH_AND_INTEGRITY_PASS=true | tee "$GITHUB_WORKSPACE/report/full-root-gate.env"
+          unzip -tq full-roots/debian10.zip >/dev/null
+          sha256sum full-roots/*.zip | tee "$GITHUB_WORKSPACE/report/root-sha256.txt"
+          stat -c '%n %s bytes' full-roots/*.zip | tee "$GITHUB_WORKSPACE/report/root-sizes.txt"
+          {
+            echo SPLIT_ROOTS_FETCH_PASS=true
+            echo FULL_ROOTS_FETCH_PASS=true
+            echo FULL50_DEBIAN_DEPENDENCY_SATISFIED=true
+          } | tee "$GITHUB_WORKSPACE/report/root-gate.env"
 
       - name: Start sterile Xvfb display
         shell: bash
@@ -92,7 +111,7 @@ jobs:
           sleep 2
           DISPLAY=:99 xdpyinfo > "$GITHUB_WORKSPACE/report/xdpyinfo.txt"
 
-      - name: Prove normal core can execute Linux and Wine before HOTD
+      - name: Prove Wine semantically on four normal-core lanes
         shell: bash
         run: |
           set -euo pipefail
@@ -103,97 +122,63 @@ jobs:
           export LIBGL_ALWAYS_SOFTWARE=1
           export XDG_RUNTIME_DIR="$RUNNER_TEMP/xdg"
 
-          : > "$REPORT/normal-baseline.tsv"
-          printf 'lane\tcommand\texit_code\tclassification\n' >> "$REPORT/normal-baseline.tsv"
+          : > "$REPORT/wine-semantic-baseline.tsv"
+          printf 'lane\texit_code\twine_banner\tclean_shutdown\tcrash\tverdict\n' >> "$REPORT/wine-semantic-baseline.tsv"
 
           probe() {
             local lane="$1"; shift
-            local cmd="$1"; shift
-            local log="$REPORT/normal-${lane}-${cmd}.log"
+            local log="$REPORT/wine-$lane.log"
+            local root="root-wine-$lane"
+            rm -rf "$root"; mkdir -p "$root"
             set +e
-            timeout 25s "$@" > "$log" 2>&1
+            timeout 25s "$BW" -root "$root" "$@" -nosound /bin/wine --version > "$log" 2>&1
             local rc=$?
             set -e
-            local class=FAIL
-            [[ "$rc" -eq 0 ]] && class=PASS
-            [[ "$rc" -eq 124 ]] && class=TIMEOUT
-            [[ "$rc" -eq 139 ]] && class=HOST_SEGFAULT
-            printf '%s\t%s\t%s\t%s\n' "$lane" "$cmd" "$rc" "$class" >> "$REPORT/normal-baseline.tsv"
-            echo "--- $lane/$cmd rc=$rc class=$class ---"
-            tail -n 80 "$log" || true
+
+            local banner=false shutdown=false crash=false verdict=FAIL
+            grep -Eq '^wine-[0-9]' "$log" && banner=true || true
+            grep -q 'Boxedwine shutdown' "$log" && shutdown=true || true
+            if [[ "$rc" -eq 139 ]] || grep -Eiq 'starting debugger|winedbg|assertion failed|double free|corruption|unhandled exception|segmentation fault|fatal signal|core dumped' "$log"; then
+              crash=true
+            fi
+            if [[ "$banner" == true && "$shutdown" == true && "$crash" == false ]]; then
+              verdict=PASS
+            fi
+            printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$lane" "$rc" "$banner" "$shutdown" "$crash" "$verdict" >> "$REPORT/wine-semantic-baseline.tsv"
+            echo "--- $lane rc=$rc verdict=$verdict ---"
+            cat "$log"
           }
 
-          mkdir -p root17 root50
-          probe full17 wine-version \
-            "$BW" -root root17 -zip full-roots/Debian10-Wine-1.7.zip -nosound /bin/wine --version
-          probe full50 wine-version \
-            "$BW" -root root50 -zip full-roots/Debian10-Wine-5.0.zip -nosound /bin/wine --version
-          cat "$REPORT/normal-baseline.tsv"
+          probe split17 -zip "$(cat debian.path)" -zip "$(cat wine17.path)"
+          probe split50 -zip "$(cat debian.path)" -zip "$(cat wine50.path)"
+          probe full17 -zip full-roots/Debian10-Wine-1.7.zip
+          probe full50 -zip full-roots/Debian10-Wine-5.0.zip
 
-          PASS_COUNT="$(awk -F '\t' '$2=="wine-version" && $3==0 && $4=="PASS" {n++} END{print n+0}' "$REPORT/normal-baseline.tsv")"
+          PASS_COUNT="$(awk -F '\t' '$6=="PASS" {n++} END{print n+0}' "$REPORT/wine-semantic-baseline.tsv")"
           {
-            echo NORMAL_WINE_BASELINE_PASS_COUNT="$PASS_COUNT"
+            echo WINE_SEMANTIC_PASS_COUNT="$PASS_COUNT"
+            echo WINE_TOTAL_LANES=4
             if [[ "$PASS_COUNT" -gt 0 ]]; then
               echo NORMAL_HOST_RUNTIME_GATE=PASS
-            elif grep -q HOST_SEGFAULT "$REPORT/normal-baseline.tsv"; then
-              echo NORMAL_HOST_RUNTIME_GATE=FAIL_HOST_SEGFAULT
             else
-              echo NORMAL_HOST_RUNTIME_GATE=FAIL_OTHER
+              echo NORMAL_HOST_RUNTIME_GATE=FAIL
             fi
-          } | tee "$REPORT/normal-host-gate.env"
+          } | tee "$REPORT/wine-semantic-gate.env"
+          cat "$REPORT/wine-semantic-baseline.tsv"
+          test "$PASS_COUNT" -gt 0
 
-      - name: Capture normal-core backtrace if baseline still segfaults
-        if: always()
+      - name: Recover genuine SEGA HOTD demo ephemerally
         shell: bash
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE/lab"
           REPORT="$GITHUB_WORKSPACE/report"
-          BW="$GITHUB_WORKSPACE/lab/Boxedwine/project/linux/bin/boxedwine"
-          export DISPLAY=:99
-          export LIBGL_ALWAYS_SOFTWARE=1
-          export XDG_RUNTIME_DIR="$RUNNER_TEMP/xdg"
-
-          if ! grep -q HOST_SEGFAULT "$REPORT/normal-baseline.tsv" 2>/dev/null; then
-            echo NORMAL_GDB_SKIPPED_NO_HOST_SEGFAULT=true | tee "$REPORT/normal-gdb-gate.env"
-            exit 0
-          fi
-          LANE=full17
-          FS=full-roots/Debian10-Wine-1.7.zip
-          if ! awk -F '\t' '$1=="full17" && $4=="HOST_SEGFAULT" {ok=1} END{exit !ok}' "$REPORT/normal-baseline.tsv"; then
-            LANE=full50
-            FS=full-roots/Debian10-Wine-5.0.zip
-          fi
-          mkdir -p root-gdb-normal
-          echo "GDB_TARGET=$LANE" | tee "$REPORT/normal-gdb-gate.env"
-          set +e
-          timeout 35s gdb -q -batch \
-            -ex 'set pagination off' -ex 'set confirm off' -ex run \
-            -ex 'info threads' -ex 'thread apply all bt' \
-            --args "$BW" -root root-gdb-normal -zip "$FS" -nosound /bin/wine --version \
-            > "$REPORT/normal-gdb-${LANE}.txt" 2>&1
-          RC=$?
-          set -e
-          echo "GDB_EXIT_CODE=$RC" | tee -a "$REPORT/normal-gdb-gate.env"
-          sed -n '1,260p' "$REPORT/normal-gdb-${LANE}.txt" || true
-
-      - name: Recover genuine SEGA demo only after normal Wine baseline passes
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$GITHUB_WORKSPACE/lab"
-          REPORT="$GITHUB_WORKSPACE/report"
-          if ! grep -q 'NORMAL_HOST_RUNTIME_GATE=PASS' "$REPORT/normal-host-gate.env" 2>/dev/null; then
-            echo HOTD_NORMAL_EXECUTION_SKIPPED_REASON=NORMAL_HOST_BASELINE_NOT_GREEN | tee "$REPORT/hotd-normal-gate.env"
-            exit 0
-          fi
-
           mkdir -p cd-outer cd-root installer-inner
           curl --fail --location --retry 3 --output cdzone67.rar "$PCZONE_CD_ARCHIVE"
           test "$(sha256sum cdzone67.rar | awk '{print $1}')" = "$PCZONE_RAR_SHA256"
           unar -f -o cd-outer cdzone67.rar >/dev/null
           IMG="$(find cd-outer -type f -iname '*.img' -print -quit)"
+          test -n "$IMG"
           ccd2iso "$IMG" cdzone67.iso >/dev/null
           7z x -y -ocd-root cdzone67.iso >/dev/null
           INSTALLER="$(find cd-root -type f -ipath '*/Gamedemo/Win95/hotd/Install.exe' -print -quit)"
@@ -205,57 +190,69 @@ jobs:
           test -n "$GAME_EXE"
           test "$(sha256sum "$GAME_EXE" | awk '{print $1}')" = "$HOTD_EXE_SHA256"
           printf '%s\n' "$GAME_DIR" > game-dir.path
+          find "$GAME_DIR" -maxdepth 2 -type f -printf '%P\t%s bytes\n' | sort > "$REPORT/hotd-game-directory.txt"
           {
             echo PACKAGE_IDENTITY_PASS=true
+            echo HOTD_INSTALLER_SHA256="$HOTD_INSTALLER_SHA256"
             echo HOTD_EXE_SHA256="$HOTD_EXE_SHA256"
             echo HOTD_BINARY_PERSISTED=NO
             echo HOTD_BINARY_UPLOADED=NO
-          } | tee "$REPORT/hotd-normal-identity.env"
+          } | tee "$REPORT/hotd-identity.env"
 
-      - name: Run strict HOTD normal-core full-root matrix
-        if: always()
+      - name: Run genuine HOTD launch matrix on every green Wine lane
         shell: bash
         run: |
           set -euo pipefail
           cd "$GITHUB_WORKSPACE/lab"
           REPORT="$GITHUB_WORKSPACE/report"
           BW="$GITHUB_WORKSPACE/lab/Boxedwine/project/linux/bin/boxedwine"
+          GAME_DIR="$(cat game-dir.path)"
           export DISPLAY=:99
           export LIBGL_ALWAYS_SOFTWARE=1
           export XDG_RUNTIME_DIR="$RUNNER_TEMP/xdg"
 
-          : > "$REPORT/hotd-normal.tsv"
-          printf 'lane\tstate\tframe_delta\tcrash\tverdict\n' >> "$REPORT/hotd-normal.tsv"
-          if [[ ! -f game-dir.path ]]; then
-            echo HOTD_NORMAL_NATIVE_PASS=false | tee -a "$REPORT/hotd-normal-gate.env"
-            exit 0
-          fi
-          GAME_DIR="$(cat game-dir.path)"
-          PASS_COUNT=0
+          import -display :99 -window root "$RUNNER_TEMP/pre-game.png" 2>/dev/null || true
+          : > "$REPORT/hotd-launch.tsv"
+          printf 'lane\tstate\tcrash\tvisual_delta_from_blank\tmotion_delta\twindows\tlaunch_verdict\tmotion_verdict\n' >> "$REPORT/hotd-launch.tsv"
+          LAUNCH_PASS_COUNT=0
+          MOTION_PASS_COUNT=0
 
-          for lane in full17 full50; do
-            if ! awk -F '\t' -v l="$lane" '$1==l && $2=="wine-version" && $3==0 && $4=="PASS" {ok=1} END{exit !ok}' "$REPORT/normal-baseline.tsv"; then
-              printf '%s\tSKIPPED\tNA\tNA\tBASELINE_FAIL\n' "$lane" >> "$REPORT/hotd-normal.tsv"
+          for lane in split17 split50 full17 full50; do
+            if ! awk -F '\t' -v l="$lane" '$1==l && $6=="PASS" {ok=1} END{exit !ok}' "$REPORT/wine-semantic-baseline.tsv"; then
+              printf '%s\tSKIPPED\tNA\tNA\tNA\tNA\tBASELINE_FAIL\tNA\n' "$lane" >> "$REPORT/hotd-launch.tsv"
               continue
             fi
-            [[ "$lane" == full17 ]] && FS=full-roots/Debian10-Wine-1.7.zip || FS=full-roots/Debian10-Wine-5.0.zip
-            ROOT="root-hotd-normal-$lane"
-            LOG="$REPORT/hotd-normal-$lane.log"
-            F1="$RUNNER_TEMP/$lane-normal-1.png"
-            F2="$RUNNER_TEMP/$lane-normal-2.png"
+
+            ROOT="root-hotd-$lane"
+            LOG="$REPORT/hotd-$lane.log"
+            TREE="$REPORT/hotd-$lane-window-tree.txt"
+            F1="$RUNNER_TEMP/hotd-$lane-1.png"
+            F2="$RUNNER_TEMP/hotd-$lane-2.png"
             rm -rf "$ROOT" "$F1" "$F2"
             mkdir -p "$ROOT"
 
+            ZIP_ARGS=()
+            case "$lane" in
+              split17) ZIP_ARGS=(-zip "$(cat debian.path)" -zip "$(cat wine17.path)") ;;
+              split50) ZIP_ARGS=(-zip "$(cat debian.path)" -zip "$(cat wine50.path)") ;;
+              full17)  ZIP_ARGS=(-zip full-roots/Debian10-Wine-1.7.zip) ;;
+              full50)  ZIP_ARGS=(-zip full-roots/Debian10-Wine-5.0.zip) ;;
+            esac
+
             set +e
-            "$BW" -root "$ROOT" -zip "$FS" \
+            "$BW" -root "$ROOT" "${ZIP_ARGS[@]}" \
               -mount_drive "$GAME_DIR" d -w /mnt/d_drive \
-              -resolution 640x480 -bpp 16 -nosound -title "HOTD-normal-$lane" \
+              -resolution 640x480 -bpp 16 -nosound -title "HOTD-$lane" \
               /bin/wine 'd:\\THOTDEMO.exe' > "$LOG" 2>&1 &
             PID=$!
             set -e
-            sleep 10
+
+            sleep 8
             import -display :99 -window root "$F1" 2>/dev/null || true
-            sleep 15
+            xwininfo -root -tree > "$TREE" 2>&1 || true
+            xdotool key Return 2>/dev/null || true
+            xdotool mousemove 512 384 click 1 2>/dev/null || true
+            sleep 10
             import -display :99 -window root "$F2" 2>/dev/null || true
 
             RC=NA
@@ -267,35 +264,68 @@ jobs:
               set -e
               STATE="EXIT_$RC"
             fi
+
             CRASH=false
             if [[ "$RC" == 139 ]] || grep -Eiq 'starting debugger|winedbg|assertion failed|double free|corruption|unhandled exception|segmentation fault|fatal signal|core dumped' "$LOG"; then
               CRASH=true
             fi
-            DELTA=NA
+
+            VISUAL=NA
+            MOTION=NA
+            if [[ -s "$RUNNER_TEMP/pre-game.png" && -s "$F1" ]]; then
+              set +e
+              D="$(compare -metric AE "$RUNNER_TEMP/pre-game.png" "$F1" null: 2>&1)"
+              set -e
+              [[ "$D" =~ ^[0-9]+$ ]] && VISUAL="$D"
+            fi
             if [[ -s "$F1" && -s "$F2" ]]; then
               set +e
               D="$(compare -metric AE "$F1" "$F2" null: 2>&1)"
               set -e
-              [[ "$D" =~ ^[0-9]+$ ]] && DELTA="$D"
+              [[ "$D" =~ ^[0-9]+$ ]] && MOTION="$D"
             fi
-            VERDICT=FAIL
-            if [[ "$STATE" == ALIVE && "$CRASH" == false && "$DELTA" != NA && "$DELTA" -gt 0 ]]; then
-              VERDICT=PASS
-              PASS_COUNT=$((PASS_COUNT + 1))
+
+            WINDOWS="$(grep -E '0x[0-9a-f]+ ' "$TREE" 2>/dev/null | wc -l | tr -d ' ')"
+            LAUNCH=FAIL
+            MOTION_VERDICT=FAIL
+            if [[ "$STATE" == ALIVE && "$CRASH" == false && "$VISUAL" != NA && "$VISUAL" -gt 0 ]]; then
+              LAUNCH=PASS
+              LAUNCH_PASS_COUNT=$((LAUNCH_PASS_COUNT + 1))
             fi
-            printf '%s\t%s\t%s\t%s\t%s\n' "$lane" "$STATE" "$DELTA" "$CRASH" "$VERDICT" >> "$REPORT/hotd-normal.tsv"
-            tail -n 120 "$LOG" || true
+            if [[ "$LAUNCH" == PASS && "$MOTION" != NA && "$MOTION" -gt 0 ]]; then
+              MOTION_VERDICT=PASS
+              MOTION_PASS_COUNT=$((MOTION_PASS_COUNT + 1))
+            fi
+
+            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+              "$lane" "$STATE" "$CRASH" "$VISUAL" "$MOTION" "$WINDOWS" "$LAUNCH" "$MOTION_VERDICT" \
+              >> "$REPORT/hotd-launch.tsv"
+            echo "--- HOTD $lane ---"
+            tail -n 160 "$LOG" || true
+            cat "$TREE" | head -n 120 || true
+
             kill "$PID" 2>/dev/null || true
             sleep 1
             kill -9 "$PID" 2>/dev/null || true
             rm -f "$F1" "$F2"
           done
-          cat "$REPORT/hotd-normal.tsv"
-          if [[ "$PASS_COUNT" -gt 0 ]]; then
-            echo HOTD_NORMAL_NATIVE_PASS=true | tee -a "$REPORT/hotd-normal-gate.env"
-          else
-            echo HOTD_NORMAL_NATIVE_PASS=false | tee -a "$REPORT/hotd-normal-gate.env"
-          fi
+
+          rm -f "$RUNNER_TEMP/pre-game.png"
+          {
+            echo HOTD_LAUNCH_PASS_COUNT="$LAUNCH_PASS_COUNT"
+            echo HOTD_MOTION_PASS_COUNT="$MOTION_PASS_COUNT"
+            if [[ "$LAUNCH_PASS_COUNT" -gt 0 ]]; then
+              echo BOXEDWINE_NATIVE_HOTD_LAUNCH_PASS=true
+            else
+              echo BOXEDWINE_NATIVE_HOTD_LAUNCH_PASS=false
+            fi
+            if [[ "$MOTION_PASS_COUNT" -gt 0 ]]; then
+              echo BOXEDWINE_NATIVE_HOTD_MOTION_PASS=true
+            else
+              echo BOXEDWINE_NATIVE_HOTD_MOTION_PASS=false
+            fi
+          } | tee "$REPORT/hotd-launch-gate.env"
+          cat "$REPORT/hotd-launch.tsv"
 
       - name: Stop sterile Xvfb
         if: always()
@@ -304,11 +334,11 @@ jobs:
           PID="$(cat "$GITHUB_WORKSPACE/lab/xvfb.pid" 2>/dev/null || true)"
           [[ -n "$PID" ]] && kill "$PID" 2>/dev/null || true
 
-      - name: Upload text-only normal-core evidence
+      - name: Upload text-only proof evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: hotd1997-boxedwine-normal-web-aligned-report
+          name: hotd1997-normal-semantic-launch-report
           path: ${{ github.workspace }}/report
           if-no-files-found: warn
           retention-days: 30
