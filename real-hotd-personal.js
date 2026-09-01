@@ -6,6 +6,7 @@
   const EXPECTED_SHA256 = '5421733293af7a57d5b7f3c4e4d53d52109c47be7b888f4b0308feb15f9ccfe6';
   const SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
   const RUNTIME_URL = './vendor/boxedwine26r1/boxedwine.html?auto=false&resolution=640x480&bpp=16&sound=true&disableHideCursor=true&storage=memory';
+  const BRIDGE_URL = new URL('./hotd-boxedwine-bridge.js', location.href).href;
 
   const $ = (id) => document.getElementById(id);
   const play = $('play');
@@ -19,6 +20,7 @@
 
   let tokenClient = null;
   let busy = false;
+  let bridgeInjected = false;
 
   function setStatus(title, text, kind = '') {
     status.textContent = title;
@@ -86,9 +88,7 @@
     });
     if (!response.ok) throw new Error(`Drive download failed: HTTP ${response.status}`);
     const buffer = await response.arrayBuffer();
-    if (buffer.byteLength !== EXPECTED_BYTES) {
-      throw new Error(`Unexpected hotd.zip size: ${buffer.byteLength} bytes`);
-    }
+    if (buffer.byteLength !== EXPECTED_BYTES) throw new Error(`Unexpected hotd.zip size: ${buffer.byteLength} bytes`);
     const hash = await crypto.subtle.digest('SHA-256', buffer);
     const hex = [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, '0')).join('');
     if (hex !== EXPECTED_SHA256) throw new Error(`hotd.zip hash mismatch: ${hex}`);
@@ -106,8 +106,23 @@
   }
 
   function loadRuntime() {
-    if (!frame.src || frame.src === 'about:blank') frame.src = RUNTIME_URL;
+    if (!frame.getAttribute('src') || frame.getAttribute('src') === 'about:blank') frame.src = RUNTIME_URL;
     frameWrap.hidden = false;
+  }
+
+  function injectBridge() {
+    if (bridgeInjected) return;
+    const doc = frame.contentDocument;
+    if (!doc || doc.readyState === 'loading') return;
+    if (doc.querySelector('script[data-hotd-bridge]')) {
+      bridgeInjected = true;
+      return;
+    }
+    const script = doc.createElement('script');
+    script.src = BRIDGE_URL;
+    script.dataset.hotdBridge = '1';
+    doc.head.appendChild(script);
+    bridgeInjected = true;
   }
 
   function waitForBridge(timeout = 30000) {
@@ -115,6 +130,7 @@
       const start = Date.now();
       const tick = () => {
         try {
+          injectBridge();
           const w = frame.contentWindow;
           if (typeof w?.hotdBridgeSetPayload === 'function' && typeof w?.hotdBridgeStart === 'function') return resolve(w);
         } catch (_) {}
@@ -142,6 +158,7 @@
       setStatus('GOOGLE DRIVE SIGN-IN', 'Authorize read-only access to your Drive copy.', 'busy');
       const accessToken = await requestToken(clientId);
       const bytes = await fetchPrivateZip(accessToken);
+      bridgeInjected = false;
       loadRuntime();
       const runtime = await waitForBridge();
       const payload = toBase64(bytes);
@@ -161,6 +178,7 @@
   play.addEventListener('click', launch);
   saveClient.addEventListener('click', saveClientId);
   clientInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') saveClientId(); });
+  frame.addEventListener('load', () => { try { injectBridge(); } catch (_) {} });
 
   const existing = getClientId();
   if (existing) {
