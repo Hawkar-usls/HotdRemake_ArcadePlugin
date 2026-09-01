@@ -1,0 +1,106 @@
+name: HOTDDEMO Apaja Wayback Probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hotddemo-apaja-wayback-probe.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Install helpers
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends curl jq arj file
+          mkdir -p lab report
+
+      - name: Probe Wayback for the four HOTD demo volumes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd lab
+          : > ../report/candidates.tsv
+          : > ../report/downloads.tsv
+          for NAME in HOTDDEMO.ARJ HOTDDEMO.A01 HOTDDEMO.A02 HOTDDEMO.A03; do
+            echo "=== $NAME ===" | tee -a ../report/probe.log
+            curl -fsS --retry 3 -G 'https://web.archive.org/cdx/search/cdx' \
+              --data-urlencode "url=*/$NAME" \
+              --data-urlencode 'output=json' \
+              --data-urlencode 'fl=timestamp,original,statuscode,mimetype,digest,length' \
+              --data-urlencode 'filter=statuscode:200' \
+              --data-urlencode 'collapse=digest' \
+              -o "$NAME.cdx.json" || echo '[]' > "$NAME.cdx.json"
+            jq -r --arg n "$NAME" 'if length>1 then .[1:][] | [$n,.[0],.[1],.[2],.[3],.[4],.[5]] | @tsv else empty end' "$NAME.cdx.json" | tee -a ../report/candidates.tsv
+          done
+
+      - name: Try archived binary candidates without persisting them
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd lab
+          for NAME in HOTDDEMO.ARJ HOTDDEMO.A01 HOTDDEMO.A02 HOTDDEMO.A03; do
+            FOUND=0
+            while IFS=$'\t' read -r N TS ORIG STATUS MIME DIGEST LEN; do
+              [ "$N" = "$NAME" ] || continue
+              URL="https://web.archive.org/web/${TS}id_/${ORIG}"
+              TMP="$NAME.tmp"
+              if curl -fL --retry 2 --max-time 90 -o "$TMP" "$URL"; then
+                SIZE="$(stat -c %s "$TMP")"
+                TYPE="$(file -b "$TMP" | tr '\t\n' '  ')"
+                SHA="$(sha256sum "$TMP" | awk '{print $1}')"
+                printf '%s\t%s\t%s\t%s\t%s\n' "$NAME" "$SIZE" "$SHA" "$TS" "$TYPE" | tee -a ../report/downloads.tsv
+                if [ "$SIZE" -gt 1000000 ] && ! head -c 32 "$TMP" | grep -Eqi '<!doctype|<html'; then
+                  mv "$TMP" "$NAME"
+                  FOUND=1
+                  break
+                fi
+                rm -f "$TMP"
+              fi
+            done < ../report/candidates.tsv
+            echo "$NAME_FOUND=$FOUND" >> ../report/final.env
+          done
+
+      - name: Test multipart ARJ if all volumes were recovered
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd lab
+          ALL=1
+          for NAME in HOTDDEMO.ARJ HOTDDEMO.A01 HOTDDEMO.A02 HOTDDEMO.A03; do
+            [ -s "$NAME" ] || ALL=0
+          done
+          echo "ALL_FOUR_VOLUMES_RECOVERED=$ALL" >> ../report/final.env
+          if [ "$ALL" -eq 1 ]; then
+            sha256sum HOTDDEMO.ARJ HOTDDEMO.A01 HOTDDEMO.A02 HOTDDEMO.A03 > ../report/volume-sha256.txt
+            set +e
+            arj t HOTDDEMO.ARJ > ../report/arj-test.txt 2>&1
+            TEST_RC=$?
+            mkdir -p extracted
+            arj x -y HOTDDEMO.ARJ extracted/ > ../report/arj-extract.txt 2>&1
+            EXTRACT_RC=$?
+            set -e
+            echo "ARJ_TEST_RC=$TEST_RC" >> ../report/final.env
+            echo "ARJ_EXTRACT_RC=$EXTRACT_RC" >> ../report/final.env
+            find extracted -maxdepth 4 -type f -printf '%P\t%s\n' | sort > ../report/extracted-files.tsv || true
+            find extracted -type f \( -iname 'RUNDEMO.EXE' -o -iname 'THOTDEMO.exe' -o -iname 'Install.exe' \) -printf '%P\t%s\n' > ../report/hotd-entrypoints.tsv || true
+          else
+            echo 'ARJ_TEST_RC=NOT_RUN' >> ../report/final.env
+            echo 'ARJ_EXTRACT_RC=NOT_RUN' >> ../report/final.env
+          fi
+          rm -f HOTDDEMO.ARJ HOTDDEMO.A01 HOTDDEMO.A02 HOTDDEMO.A03
+
+      - name: Upload text-only evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hotddemo-apaja-wayback-probe-report
+          path: report
+          retention-days: 14
