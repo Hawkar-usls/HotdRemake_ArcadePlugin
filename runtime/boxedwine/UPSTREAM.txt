@@ -1,0 +1,5 @@
+BoxedWine 26R1 Web/Wine6 runtime
+Upstream: https://github.com/danoon2/Boxedwine
+Source commit: 2473488cfcf1ba914daf5aad097da0c59bb16073
+License: GPL-2.0
+No HOTD game data is included in this directory.
