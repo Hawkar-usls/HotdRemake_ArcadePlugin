@@ -1,0 +1,59 @@
+name: HOTD 1997 Public Playable Gate
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'hotd1997-source-gate.json'
+      - 'real-hotd.html'
+      - '.github/workflows/hotd1997-public-playable-gate.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  evaluate-public-gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Evaluate authorized-source and public-playability contract
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import json, os, sys
+          from pathlib import Path
+
+          p = Path('hotd1997-source-gate.json')
+          gate = json.loads(p.read_text())
+
+          source = gate['authorized_source']
+          public = gate['public_deployment']
+          runtime = gate['runtime']
+
+          status = source['status']
+          if status not in {'OPEN', 'PASS', 'BLOCKED'}:
+              raise SystemExit(f'Invalid authorized_source.status: {status}')
+
+          if status == 'PASS':
+              if not source.get('source_url'):
+                  raise SystemExit('AUTHORIZED_SOURCE=PASS requires source_url')
+              if not source.get('authorization_evidence_url'):
+                  raise SystemExit('AUTHORIZED_SOURCE=PASS requires authorization_evidence_url')
+
+          if public.get('public_playable_pass'):
+              required = {
+                  'authorized_source_pass': status == 'PASS',
+                  'game_body_deployed': public.get('game_body_deployed') is True,
+                  'human_playability_proven': runtime.get('human_playability_proven') is True,
+              }
+              failed = [k for k,v in required.items() if not v]
+              if failed:
+                  raise SystemExit('False PUBLIC_PLAYABLE_PASS; missing: ' + ', '.join(failed))
+
+          verdict = 'PASS' if public.get('public_playable_pass') else 'OPEN'
+          summary = f'''# HOTD 1997 Public Playable Gate\n\n- AUTHORIZED_SOURCE: **{status}**\n- RUNTIME_SMOKE_PASS: **{runtime.get('runtime_smoke_pass')}**\n- HUMAN_PLAYABILITY_PROVEN: **{runtime.get('human_playability_proven')}**\n- GAME_BODY_DEPLOYED: **{public.get('game_body_deployed')}**\n- PUBLIC_PLAYABLE_PASS: **{public.get('public_playable_pass')}**\n- VERDICT: **{verdict}**\n'''
+          print(summary)
+          Path(os.environ['GITHUB_STEP_SUMMARY']).write_text(summary)
+          PY
