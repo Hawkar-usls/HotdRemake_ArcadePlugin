@@ -1,4 +1,4 @@
-name: HOTD 1997 Official 26R1 Wine6 Web Proof
+name: HOTD 1997 Official 26R1 Wine6 Runtime Smoke
 
 on:
   workflow_dispatch:
@@ -11,7 +11,7 @@ permissions:
   contents: read
 
 jobs:
-  official-26r1-wine6-proof:
+  runtime-smoke:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
@@ -28,15 +28,13 @@ jobs:
           sudo apt-get install -y -qq --no-install-recommends curl unzip zip unar p7zip-full ccd2iso python3 imagemagick
           mkdir -p lab site report
 
-      - name: Fetch exact official BoxedWine 26R1 Wine6 single-threaded web stack
+      - name: Fetch official BoxedWine 26R1 Wine6 single-threaded web stack
         shell: bash
         run: |
           set -euo pipefail
           cd site
           curl --fail --location --retry 3 -o boxedwine.html "$BOXEDWINE_WEB_BASE/boxedwine.html"
           curl --fail --location --retry 3 -o boxedwine.zip "$BOXEDWINE_WEB_BASE/boxedwine.zip"
-          # Discover same-origin assets directly from the official HTML so this proof
-          # follows the released 26R1 page rather than guessing an old asset list.
           python3 - <<'PY'
           from pathlib import Path
           import re
@@ -51,17 +49,15 @@ jobs:
               if not x or '://' in x or x.startswith('/') or x.startswith('data:'): continue
               if x not in keep: keep.append(x)
           Path('../lab/assets.txt').write_text('\n'.join(keep)+'\n')
-          print('\n'.join(keep))
           PY
           while IFS= read -r f; do
             mkdir -p "$(dirname "$f")"
             curl --fail --location --retry 3 -o "$f" "$BOXEDWINE_WEB_BASE/$f"
           done < ../lab/assets.txt
           unzip -tq boxedwine.zip >/dev/null
-          sha256sum boxedwine.html boxedwine.js boxedwine.wasm boxedwine.zip | tee ../report/official-runtime-sha256.txt
-          printf 'OFFICIAL_RELEASE=26R1\nWINE_LINE=6\nTHREADING=single\nOFFICIAL_RUNTIME_FETCH_PASS=true\n' > ../report/runtime.env
+          printf 'OFFICIAL_RELEASE=26R1\nWINE_LINE=6\nTHREADING=single\nRUNTIME_FETCH_PASS=true\n' > ../report/runtime.env
 
-      - name: Fetch genuine HOTD demo ephemerally
+      - name: Reconstruct HOTD demo ephemerally for smoke test
         shell: bash
         run: |
           set -euo pipefail
@@ -81,9 +77,8 @@ jobs:
           GAME_DIR="$(find installer-inner -type d -iname hotd_demo -print -quit)"
           test -f "$GAME_DIR/THOTDEMO.exe"
           test -f "$GAME_DIR/RUNDEMO.EXE" || test -f "$GAME_DIR/rundemo.exe"
-          find "$GAME_DIR" -maxdepth 1 -type f -printf '%f\n' | sort > "$GITHUB_WORKSPACE/report/game-file-names.txt"
           (cd "$GAME_DIR" && zip -qr "$GITHUB_WORKSPACE/site/hotd.zip" .)
-          printf 'PACKAGE_IDENTITY_PASS=true\nHOTD_BINARY_PERSISTED=NO\nHOTD_BINARY_UPLOADED=NO\n' > "$GITHUB_WORKSPACE/report/package.env"
+          printf 'PACKAGE_IDENTITY_PASS=true\nHOTD_BINARY_PERSISTED=NO\nHOTD_BINARY_UPLOADED=NO\nPUBLIC_GAME_BODY_DEPLOYED=NO\n' > "$GITHUB_WORKSPACE/report/package.env"
 
       - name: Install Chromium
         shell: bash
@@ -93,7 +88,7 @@ jobs:
           npm install --silent playwright@1.55.0
           npx playwright install --with-deps chromium >/dev/null
 
-      - name: Serve exact official runtime locally
+      - name: Serve temporary smoke-test site
         shell: bash
         run: |
           cd site
@@ -102,12 +97,12 @@ jobs:
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8000/boxedwine.html >/dev/null && exit 0; sleep 1; done
           exit 1
 
-      - name: Prove RUNDEMO and THOTDEMO real motion
+      - name: Measure runtime activity, not human playability
         shell: bash
         run: |
           set -euo pipefail
           cd lab
-          cat > proof.js <<'NODE'
+          cat > smoke.js <<'NODE'
           const { chromium }=require('playwright');
           const fs=require('fs');
           const {execFileSync}=require('child_process');
@@ -131,34 +126,31 @@ jobs:
             await page.waitForTimeout(12000);
             await page.screenshot({path:`${tmp}/${key}-2.png`});
             const boot=delta(`${tmp}/${key}-0.png`,`${tmp}/${key}-1.png`);
-            const motion=delta(`${tmp}/${key}-1.png`,`${tmp}/${key}-2.png`);
+            const activity=delta(`${tmp}/${key}-1.png`,`${tmp}/${key}-2.png`);
             const text=logs.join('\n')+'\n'+errs.join('\n');
             const crash=/(starting debugger|wine debugger|winedbg|unhandled page fault|unhandled exception|assertion failed|double free|corruption|segmentation fault|setjmp is required|unimplemented function|failed to initialize|abort\(|RuntimeError|Internal crash)/i.test(text);
             const launch=/Launching .*wine/i.test(text);
-            const pass=errs.length===0&&!crash&&launch&&boot>0&&motion>0;
-            fs.writeFileSync(`${out}/${key}-console.log`,logs.join('\n')+'\n');
-            fs.writeFileSync(`${out}/${key}-errors.log`,errs.join('\n')+'\n');
-            fs.writeFileSync(`${out}/${key}-gate.env`,[`PROGRAM=${program}`,`PAGE_ERROR_COUNT=${errs.length}`,`LAUNCH_LOG=${launch}`,`CRASH_SIGNATURE=${crash}`,`BOOT_DELTA=${boot}`,`MOTION_DELTA=${motion}`,`PLAYABLE_MOTION_PASS=${pass}`].join('\n')+'\n');
+            const smoke=errs.length===0&&!crash&&launch&&boot>0&&activity>0;
+            fs.writeFileSync(`${out}/${key}-gate.env`,[`PROGRAM=${program}`,`PAGE_ERROR_COUNT=${errs.length}`,`LAUNCH_LOG=${launch}`,`CRASH_SIGNATURE=${crash}`,`BOOT_DELTA=${boot}`,`POST_INPUT_FRAME_DELTA=${activity}`,`RUNTIME_SMOKE_PASS=${smoke}`,`HUMAN_PLAYABILITY_PROVEN=false`].join('\n')+'\n');
             await page.close();
             for(const n of [0,1,2]) try{fs.unlinkSync(`${tmp}/${key}-${n}.png`)}catch(_){}
-            return pass;
+            return smoke;
           }
           (async()=>{
             const browser=await chromium.launch({headless:true,args:['--disable-dev-shm-usage','--enable-webgl','--enable-unsafe-swiftshader','--ignore-gpu-blocklist']});
             const a=await lane(browser,'RUNDEMO.EXE','rundemo');
             const b=await lane(browser,'THOTDEMO.exe','thotdemo');
             await browser.close();
-            fs.writeFileSync(process.env.GITHUB_WORKSPACE+'/report/final.env',`RUNDEMO_PASS=${a}\nTHOTDEMO_PASS=${b}\nANY_PLAYABLE_PASS=${a||b}\n`);
-            console.log(`RUNDEMO_PASS=${a}\nTHOTDEMO_PASS=${b}\nANY_PLAYABLE_PASS=${a||b}`);
+            fs.writeFileSync(process.env.GITHUB_WORKSPACE+'/report/final.env',`RUNDEMO_RUNTIME_SMOKE_PASS=${a}\nTHOTDEMO_RUNTIME_SMOKE_PASS=${b}\nANY_RUNTIME_SMOKE_PASS=${a||b}\nPUBLIC_PLAYABLE_PASS=false\n`);
             process.exit(a||b?0:2);
           })().catch(e=>{console.error(e);process.exit(3)});
           NODE
           set +e
-          node proof.js
+          node smoke.js
           RC=$?
           set -e
           rm -f ../site/hotd.zip
-          echo PROOF_EXIT_CODE=$RC >> ../report/final.env
+          echo SMOKE_EXIT_CODE=$RC >> ../report/final.env
           test "$RC" -eq 0
 
       - name: Cleanup
@@ -168,10 +160,10 @@ jobs:
           kill "$(cat lab/http.pid 2>/dev/null)" 2>/dev/null || true
           rm -f site/hotd.zip
 
-      - name: Upload text-only evidence
+      - name: Upload text-only smoke evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: hotd1997-official-26r1-wine6-proof-report
+          name: hotd1997-runtime-smoke-report
           path: report
           retention-days: 30
