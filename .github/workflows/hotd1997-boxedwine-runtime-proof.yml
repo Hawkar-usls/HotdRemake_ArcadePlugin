@@ -77,7 +77,7 @@ jobs:
           set -euo pipefail
           cd "$GITHUB_WORKSPACE/lab"
           mkdir -p portable
-          curl --fail --location --retry 3 --retry-all-errors \
+          curl --fail --location --retry 3 \
             --output boxedwine-offline.zip "$BOXEDWINE_OFFLINE_BUNDLE"
           test "$(sha256sum boxedwine-offline.zip | awk '{print $1}')" = "$BOXEDWINE_OFFLINE_SHA256"
           unzip -q boxedwine-offline.zip -d portable
@@ -105,7 +105,7 @@ jobs:
           set -euo pipefail
           cd "$GITHUB_WORKSPACE/lab"
           mkdir -p cd-outer cd-root installer-inner
-          curl --fail --location --retry 3 --retry-all-errors \
+          curl --fail --location --retry 3 \
             --output cdzone67.rar "$PCZONE_CD_ARCHIVE"
           test "$(sha256sum cdzone67.rar | awk '{print $1}')" = "$PCZONE_RAR_SHA256"
           unar -f -o cd-outer cdzone67.rar >/dev/null
