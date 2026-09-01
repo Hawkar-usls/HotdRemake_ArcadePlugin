@@ -5,6 +5,10 @@ on:
   push:
     branches: [main]
     paths:
+      - 'real-hotd.html'
+      - 'real-hotd-personal.js'
+      - 'hotd-boxedwine-bridge.js'
+      - 'vendor/boxedwine26r1/**'
       - '.github/workflows/hotd-private-gateway-artifact-proof.yml'
 
 permissions:
