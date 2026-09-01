@@ -11,45 +11,270 @@ permissions:
   contents: read
 
 jobs:
-  probe-offline-rootfs:
+  hotd-native-version-locked-matrix:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    container: ubuntu:20.04
+    timeout-minutes: 50
     env:
+      DEBIAN_FRONTEND: noninteractive
+      BOXEDWINE_SOURCE_SHA: 5a2195ba47a169455c2dbe6bcb4bae4c256c9bad
       BOXEDWINE_OFFLINE_BUNDLE: https://sourceforge.net/projects/boxedwine/files/Builds/20.1.2/BoxedWine%2020.1.2%20-%20Windows.zip/download
+      BOXEDWINE_OFFLINE_SHA256: 69bbc533af07aa39ffabbf49a04e9d0d6c275d0698aec8d5124fe0d3bc57b53e
+      PCZONE_CD_ARCHIVE: https://pixsoriginadventures.co.uk/PCZone/PC%20Zone%2067%20%28September%201998%29/CDZone%2367.rar
+      PCZONE_RAR_SHA256: 1a8695d904886e028b4e14aa59b85934c1d867ed03d2f3a18c9d202691efa1ba
+      HOTD_INSTALLER_SHA256: 6150da85cd5e7ba88bbe722aba8202d5f8726b66eb1e8614b2bda5e89ae76944
+      HOTD_EXE_SHA256: 96951e783957858d20d181884ecd0566d53f91a88586345dc6fd126ca986d29f
+      WINE17_SHA256: ceef9149e4607cad2001f365fed430c8c09845440d28bc25cc6914390640bf53
+      WINE50_SHA256: 8fbe402c0c6b839e1f5db83414ac86a4a94c3e78b4a401caaf2a16e272e9747f
+      DEBIAN10_SHA256: 722915350b7e3ea7da9fcfbd1faaf14a137dd979fe473257045dc9c902dedd0e
     steps:
-      - name: Fetch official offline BoxedWine bundle
+      - name: Install exact-era build and sterile execution tools
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "$RUNNER_TEMP/rootfs-probe/report" "$RUNNER_TEMP/rootfs-probe/portable"
-          cd "$RUNNER_TEMP/rootfs-probe"
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends \
+            ca-certificates git curl unzip file cmake build-essential \
+            libsdl2-dev libssl-dev libminizip-dev libgl1-mesa-dev libglu1-mesa-dev libgl1-mesa-dri \
+            xvfb x11-utils imagemagick unar p7zip-full ccd2iso
+          gcc --version | head -n 1
+          cmake --version | head -n 1
+
+      - name: Checkout exact BoxedWine 20.1.2 source revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$GITHUB_WORKSPACE/lab" "$GITHUB_WORKSPACE/report"
+          cd "$GITHUB_WORKSPACE/lab"
+          git init -q Boxedwine
+          cd Boxedwine
+          git remote add origin https://github.com/danoon2/Boxedwine.git
+          git fetch -q --depth=1 origin "$BOXEDWINE_SOURCE_SHA"
+          git checkout -q --detach FETCH_HEAD
+          ACTUAL="$(git rev-parse HEAD)"
+          test "$ACTUAL" = "$BOXEDWINE_SOURCE_SHA"
+          {
+            echo "BOXEDWINE_SOURCE_SHA=$ACTUAL"
+            echo "BOXEDWINE_EXPECTED_RELEASE=20.1.2"
+            git show -s --format='BOXEDWINE_SOURCE_DATE=%cI%nBOXEDWINE_SOURCE_SUBJECT=%s' HEAD
+          } | tee "$GITHUB_WORKSPACE/report/source-provenance.env"
+
+      - name: Build historical native BoxedWine 20.1.2
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/lab/Boxedwine/project/linux"
+          sh build64.sh > "$GITHUB_WORKSPACE/report/build64.log" 2>&1
+          test -x bin/boxedwine64
+          file bin/boxedwine64 | tee "$GITHUB_WORKSPACE/report/boxedwine-binary-type.txt"
+          sha256sum bin/boxedwine64 | tee "$GITHUB_WORKSPACE/report/boxedwine-native-sha256.txt"
+          ./bin/boxedwine64 -version > "$GITHUB_WORKSPACE/report/boxedwine-version.txt" 2>&1 || true
+          tail -n 30 "$GITHUB_WORKSPACE/report/boxedwine-version.txt" || true
+
+      - name: Recover official 20.1.2 filesystem roots and verify hashes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/lab"
+          mkdir -p portable
           curl --fail --location --retry 3 --retry-all-errors \
             --output boxedwine-offline.zip "$BOXEDWINE_OFFLINE_BUNDLE"
-          test -s boxedwine-offline.zip
-          file -b boxedwine-offline.zip | tee report/bundle-type.txt
-          sha256sum boxedwine-offline.zip | tee report/bundle-sha256.txt
-          unzip -tq boxedwine-offline.zip | tee report/bundle-test.txt
+          test "$(sha256sum boxedwine-offline.zip | awk '{print $1}')" = "$BOXEDWINE_OFFLINE_SHA256"
           unzip -q boxedwine-offline.zip -d portable
+          DEBIAN="$(find portable -type f -iname 'debian10.zip' -print -quit)"
+          W17="$(find portable -type f -iname 'Wine-1.7.zip' -print -quit)"
+          W50="$(find portable -type f -iname 'Wine-5.0.zip' -print -quit)"
+          test -n "$DEBIAN" && test -n "$W17" && test -n "$W50"
+          test "$(sha256sum "$DEBIAN" | awk '{print $1}')" = "$DEBIAN10_SHA256"
+          test "$(sha256sum "$W17" | awk '{print $1}')" = "$WINE17_SHA256"
+          test "$(sha256sum "$W50" | awk '{print $1}')" = "$WINE50_SHA256"
+          printf '%s\n' "$DEBIAN" > debian.path
+          printf '%s\n' "$W17" > wine17.path
+          printf '%s\n' "$W50" > wine50.path
+          {
+            echo "OFFLINE_BUNDLE_SHA256=$BOXEDWINE_OFFLINE_SHA256"
+            echo "DEBIAN10_SHA256=$DEBIAN10_SHA256"
+            echo "WINE17_SHA256=$WINE17_SHA256"
+            echo "WINE50_SHA256=$WINE50_SHA256"
+            echo "ROOTFS_HASH_GATE=PASS"
+          } | tee "$GITHUB_WORKSPACE/report/rootfs-provenance.env"
 
-      - name: Inventory bundled filesystem layers
+      - name: Recover genuine SEGA HOTD demo ephemerally and verify identity
         shell: bash
         run: |
           set -euo pipefail
-          cd "$RUNNER_TEMP/rootfs-probe"
-          find portable -type f -iname '*.zip' -printf '%p\t%s bytes\n' | sort | tee report/bundled-zips.txt
-          : > report/bundled-zip-inspection.txt
-          while IFS= read -r z; do
-            echo "===== ${z#portable/} =====" | tee -a report/bundled-zip-inspection.txt
-            sha256sum "$z" | tee -a report/bundled-zip-inspection.txt
-            unzip -l "$z" 2>/dev/null | sed -n '1,45p' | tee -a report/bundled-zip-inspection.txt || true
-          done < <(find portable -type f -iname '*.zip' | sort)
-          echo "ZIP_COUNT=$(find portable -type f -iname '*.zip' | wc -l)" | tee report/status.env
+          cd "$GITHUB_WORKSPACE/lab"
+          mkdir -p cd-outer cd-root installer-inner
+          curl --fail --location --retry 3 --retry-all-errors \
+            --output cdzone67.rar "$PCZONE_CD_ARCHIVE"
+          test "$(sha256sum cdzone67.rar | awk '{print $1}')" = "$PCZONE_RAR_SHA256"
+          unar -f -o cd-outer cdzone67.rar >/dev/null
+          IMG="$(find cd-outer -type f -iname '*.img' -print -quit)"
+          test -n "$IMG"
+          ccd2iso "$IMG" cdzone67.iso >/dev/null
+          7z x -y -ocd-root cdzone67.iso >/dev/null
+          INSTALLER="$(find cd-root -type f -ipath '*/Gamedemo/Win95/hotd/Install.exe' -print -quit)"
+          test -n "$INSTALLER"
+          INSTALLER_SHA="$(sha256sum "$INSTALLER" | awk '{print $1}')"
+          test "$INSTALLER_SHA" = "$HOTD_INSTALLER_SHA256"
+          7z x -y -oinstaller-inner "$INSTALLER" >/dev/null
+          GAME_DIR="$(find installer-inner -type d -iname 'hotd_demo' -print -quit)"
+          test -n "$GAME_DIR"
+          GAME_EXE="$(find "$GAME_DIR" -maxdepth 1 -type f -iname 'THOTDEMO.exe' -print -quit)"
+          test -n "$GAME_EXE"
+          EXE_SHA="$(sha256sum "$GAME_EXE" | awk '{print $1}')"
+          test "$EXE_SHA" = "$HOTD_EXE_SHA256"
+          printf '%s\n' "$GAME_DIR" > game-dir.path
+          {
+            echo "PCZONE_RAR_SHA256=$PCZONE_RAR_SHA256"
+            echo "HOTD_INSTALLER_SHA256=$INSTALLER_SHA"
+            echo "HOTD_EXE_SHA256=$EXE_SHA"
+            echo "HOTD_BINARY_PERSISTED=NO"
+            echo "HOTD_BINARY_UPLOADED=NO"
+            echo "PACKAGE_IDENTITY_PASS=PASS"
+          } | tee "$GITHUB_WORKSPACE/report/hotd-identity.env"
 
-      - name: Upload filesystem inventory only
+      - name: Run strict Wine 1.7 and Wine 5.0 native matrix
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/lab"
+          REPORT="$GITHUB_WORKSPACE/report"
+          BW="$GITHUB_WORKSPACE/lab/Boxedwine/project/linux/bin/boxedwine64"
+          GAME_DIR="$(cat game-dir.path)"
+          DEBIAN="$(cat debian.path)"
+
+          Xvfb :99 -screen 0 1024x768x24 -nolisten tcp > "$REPORT/xvfb.log" 2>&1 &
+          XVFB_PID=$!
+          export DISPLAY=:99
+          export LIBGL_ALWAYS_SOFTWARE=1
+          sleep 2
+          xdpyinfo > "$REPORT/xdpyinfo.txt"
+
+          : > "$REPORT/matrix.tsv"
+          printf 'lane\tprocess_alive_20s\tcrash_signature\twindow_count\tframe_delta\tverdict\n' >> "$REPORT/matrix.tsv"
+          PASS_COUNT=0
+
+          for LANE in wine17 wine50; do
+            if [[ "$LANE" == wine17 ]]; then
+              WINE="$(cat wine17.path)"
+              LABEL='Wine-1.7'
+            else
+              WINE="$(cat wine50.path)"
+              LABEL='Wine-5.0'
+            fi
+
+            ROOT="$GITHUB_WORKSPACE/lab/root-$LANE"
+            LOG="$REPORT/$LANE.log"
+            TREE="$REPORT/$LANE-window-tree.txt"
+            STATUS="$REPORT/$LANE-status.env"
+            FRAME1="$RUNNER_TEMP/$LANE-frame1.png"
+            FRAME2="$RUNNER_TEMP/$LANE-frame2.png"
+            rm -rf "$ROOT" "$FRAME1" "$FRAME2"
+            mkdir -p "$ROOT"
+
+            set +e
+            "$BW" \
+              -root "$ROOT" \
+              -zip "$DEBIAN" \
+              -zip "$WINE" \
+              -mount_drive "$GAME_DIR" d \
+              -w /mnt/d_drive \
+              -resolution 640x480 \
+              -bpp 16 \
+              -nosound \
+              -title "HOTD-$LABEL" \
+              /bin/wine 'd:\\THOTDEMO.exe' \
+              > "$LOG" 2>&1 &
+            GAME_PID=$!
+            set -e
+
+            sleep 8
+            import -display :99 -window root "$FRAME1" 2>/dev/null || true
+            sleep 12
+            xwininfo -root -tree > "$TREE" 2>&1 || true
+            import -display :99 -window root "$FRAME2" 2>/dev/null || true
+
+            STATE="$(ps -o stat= -p "$GAME_PID" 2>/dev/null | tr -d ' ' || true)"
+            if [[ -n "$STATE" && "$STATE" != Z* ]]; then
+              ALIVE=true
+            else
+              ALIVE=false
+            fi
+
+            if grep -Eiq 'starting debugger|winedbg|wine debugger|assertion failed|double free|corruption|unhandled exception|segmentation fault|fatal signal|core dumped' "$LOG"; then
+              CRASH=true
+            else
+              CRASH=false
+            fi
+
+            WINDOW_COUNT="$(grep -E '0x[0-9a-f]+ ' "$TREE" 2>/dev/null | wc -l | tr -d ' ')"
+            FRAME_DELTA=NA
+            if [[ -s "$FRAME1" && -s "$FRAME2" ]]; then
+              set +e
+              DELTA_OUT="$(compare -metric AE "$FRAME1" "$FRAME2" null: 2>&1)"
+              set -e
+              if [[ "$DELTA_OUT" =~ ^[0-9]+$ ]]; then FRAME_DELTA="$DELTA_OUT"; fi
+              identify -format 'FRAME1=%wx%h colors=%k\n' "$FRAME1" >> "$STATUS" 2>/dev/null || true
+              identify -format 'FRAME2=%wx%h colors=%k\n' "$FRAME2" >> "$STATUS" 2>/dev/null || true
+            fi
+
+            if [[ "$ALIVE" == true && "$CRASH" == false && "$WINDOW_COUNT" -gt 0 && "$FRAME_DELTA" != NA && "$FRAME_DELTA" -gt 0 ]]; then
+              VERDICT=PASS
+              PASS_COUNT=$((PASS_COUNT + 1))
+            else
+              VERDICT=FAIL
+            fi
+
+            {
+              echo "LANE=$LABEL"
+              echo "PROCESS_ALIVE_AFTER_20S=$ALIVE"
+              echo "CRASH_OR_DEBUGGER_SIGNATURE=$CRASH"
+              echo "WINDOW_COUNT=$WINDOW_COUNT"
+              echo "FRAME_PIXEL_DELTA=$FRAME_DELTA"
+              echo "NATIVE_EXECUTION_VERDICT=$VERDICT"
+            } >> "$STATUS"
+            printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$LABEL" "$ALIVE" "$CRASH" "$WINDOW_COUNT" "$FRAME_DELTA" "$VERDICT" >> "$REPORT/matrix.tsv"
+
+            if kill -0 "$GAME_PID" 2>/dev/null; then
+              kill "$GAME_PID" 2>/dev/null || true
+              sleep 1
+              kill -9 "$GAME_PID" 2>/dev/null || true
+            else
+              set +e
+              wait "$GAME_PID"
+              echo "PROCESS_EXIT_CODE=$?" >> "$STATUS"
+              set -e
+            fi
+            rm -f "$FRAME1" "$FRAME2"
+
+            echo "--- $LABEL status ---"
+            cat "$STATUS"
+            echo "--- $LABEL log tail ---"
+            tail -n 120 "$LOG" || true
+          done
+
+          kill "$XVFB_PID" 2>/dev/null || true
+          {
+            echo "PASS_COUNT=$PASS_COUNT"
+            echo "TOTAL_LANES=2"
+            if [[ "$PASS_COUNT" -gt 0 ]]; then
+              echo "BOXEDWINE_NATIVE_PASS=true"
+            else
+              echo "BOXEDWINE_NATIVE_PASS=false"
+            fi
+          } | tee "$REPORT/native-gate.env"
+          cat "$REPORT/matrix.tsv"
+
+          # A red workflow now means the actual native execution gate failed,
+          # never merely that the emulator process remained alive in WineDbg.
+          test "$PASS_COUNT" -gt 0
+
+      - name: Upload text-only compatibility evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: boxedwine-20.1.2-offline-rootfs-inventory
-          path: ${{ runner.temp }}/rootfs-probe/report
+          name: hotd1997-boxedwine-20.1.2-native-matrix-report
+          path: ${{ github.workspace }}/report
           if-no-files-found: warn
           retention-days: 30
