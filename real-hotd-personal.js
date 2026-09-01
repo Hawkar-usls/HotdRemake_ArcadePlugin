@@ -6,7 +6,7 @@
   const EXPECTED_SHA256 = '5421733293af7a57d5b7f3c4e4d53d52109c47be7b888f4b0308feb15f9ccfe6';
   const SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
   const RUNTIME_URL = './vendor/boxedwine26r1/boxedwine.html?auto=false&resolution=640x480&bpp=16&sound=true&disableHideCursor=true&storage=memory';
-  const BRIDGE_URL = new URL('./hotd-boxedwine-bridge.js?v=2', location.href).href;
+  const BRIDGE_URL = new URL('./hotd-boxedwine-bridge.js?v=3', location.href).href;
   const DB_NAME = 'hotd-private-cache-v1';
   const DB_STORE = 'payloads';
   const DB_KEY = 'hotd.zip';
@@ -23,7 +23,6 @@
 
   let tokenClient = null;
   let busy = false;
-  let bridgeInjected = false;
 
   function setStatus(title, text, kind = '') {
     status.textContent = title;
@@ -150,7 +149,7 @@
     if (!response.ok) throw new Error(`Drive download failed: HTTP ${response.status}`);
     const buffer = await response.arrayBuffer();
     await verifyBuffer(buffer);
-    setStatus('PRIVATE COPY VERIFIED', 'SHA-256 matches. Saving an encrypted-origin browser copy for future launches…', 'busy');
+    setStatus('PRIVATE COPY VERIFIED', 'SHA-256 matches. Saving a private browser copy for future launches…', 'busy');
     await cachePut(buffer);
     return buffer;
   }
@@ -166,23 +165,34 @@
   }
 
   function loadRuntime() {
-    if (!frame.getAttribute('src') || frame.getAttribute('src') === 'about:blank') frame.src = RUNTIME_URL;
     frameWrap.hidden = false;
+    const current = frame.getAttribute('src');
+    if (!current || current === 'about:blank') frame.src = RUNTIME_URL;
+  }
+
+  function boxedWineDocumentReady() {
+    try {
+      const href = frame.contentWindow?.location?.href || '';
+      return href.includes('/boxedwine.html') && frame.contentDocument && frame.contentDocument.readyState !== 'loading';
+    } catch (_) {
+      return false;
+    }
   }
 
   function injectBridge() {
-    if (bridgeInjected) return;
+    if (!boxedWineDocumentReady()) return false;
+    const w = frame.contentWindow;
     const doc = frame.contentDocument;
-    if (!doc || doc.readyState === 'loading') return;
-    if (doc.querySelector('script[data-hotd-bridge]')) {
-      bridgeInjected = true;
-      return;
-    }
+    if (typeof w.hotdBridgeSetPayload === 'function' && typeof w.hotdBridgeStart === 'function') return true;
+    if (doc.querySelector('script[data-hotd-bridge]')) return false;
+
     const script = doc.createElement('script');
     script.src = BRIDGE_URL;
     script.dataset.hotdBridge = '1';
+    script.onload = () => console.log('HOTD bridge loaded into BoxedWine frame');
+    script.onerror = () => console.error('HOTD bridge failed to load');
     doc.head.appendChild(script);
-    bridgeInjected = true;
+    return false;
   }
 
   function waitForBridge(timeout = 30000) {
@@ -192,9 +202,15 @@
         try {
           injectBridge();
           const w = frame.contentWindow;
-          if (typeof w?.hotdBridgeSetPayload === 'function' && typeof w?.hotdBridgeStart === 'function') return resolve(w);
+          if (boxedWineDocumentReady() && typeof w?.hotdBridgeSetPayload === 'function' && typeof w?.hotdBridgeStart === 'function') {
+            return resolve(w);
+          }
         } catch (_) {}
-        if (Date.now() - start > timeout) return reject(new Error('BoxedWine personal bridge did not become ready'));
+        if (Date.now() - start > timeout) {
+          let href = 'unavailable';
+          try { href = frame.contentWindow?.location?.href || href; } catch (_) {}
+          return reject(new Error(`BoxedWine personal bridge did not become ready; frame=${href}`));
+        }
         setTimeout(tick, 150);
       };
       tick();
@@ -203,7 +219,6 @@
 
   async function launchBuffer(buffer, source) {
     const bytes = new Uint8Array(buffer);
-    bridgeInjected = false;
     loadRuntime();
     const runtime = await waitForBridge();
     const payload = toBase64(bytes);
@@ -229,7 +244,7 @@
       if (!clientId) {
         oauthBox.hidden = false;
         clientInput.focus();
-        setStatus('ONE-TIME GOOGLE SETUP', 'Google requires a Web OAuth client ID for a private Drive file. After the first verified fetch, later launches use the browser cache and no Drive download is needed.', 'warn');
+        setStatus('ONE-TIME GOOGLE SETUP', 'Google requires a Web OAuth client ID for a private Drive file. After the first verified fetch, later launches use the browser cache.', 'warn');
         return;
       }
 
@@ -250,7 +265,9 @@
   play.addEventListener('click', launch);
   saveClient.addEventListener('click', saveClientId);
   clientInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') saveClientId(); });
-  frame.addEventListener('load', () => { try { injectBridge(); } catch (_) {} });
+  frame.addEventListener('load', () => {
+    try { injectBridge(); } catch (_) {}
+  });
 
   (async () => {
     const cached = await getCachedBuffer();
