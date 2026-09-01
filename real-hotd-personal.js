@@ -5,7 +5,7 @@
   const EXPECTED_BYTES = 16078013;
   const EXPECTED_SHA256 = '5421733293af7a57d5b7f3c4e4d53d52109c47be7b888f4b0308feb15f9ccfe6';
   const SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
-  const RUNTIME_URL = './vendor/boxedwine26r1/boxedwine.html?auto=false&resolution=640x480&bpp=16&sound=true&disableHideCursor=true&storage=memory';
+  const RUNTIME_URL = './vendor/boxedwine26r1/boxedwine.html?auto=false&resolution=640x480&bpp=16&sound=true&disableHideCursor=true';
   const BRIDGE_URL = new URL('./hotd-boxedwine-bridge.js?v=3', location.href).href;
   const DB_NAME = 'hotd-private-cache-v1';
   const DB_STORE = 'payloads';
@@ -114,10 +114,10 @@
 
   function waitForGoogle(timeout = 15000) {
     return new Promise((resolve, reject) => {
-      const start = Date.now();
+      const started = Date.now();
       const tick = () => {
         if (window.google?.accounts?.oauth2) return resolve();
-        if (Date.now() - start > timeout) return reject(new Error('Google Identity Services did not load'));
+        if (Date.now() - started > timeout) return reject(new Error('Google Identity Services did not load'));
         setTimeout(tick, 100);
       };
       tick();
@@ -173,7 +173,7 @@
   function boxedWineDocumentReady() {
     try {
       const href = frame.contentWindow?.location?.href || '';
-      return href.includes('/boxedwine.html') && frame.contentDocument && frame.contentDocument.readyState !== 'loading';
+      return href.includes('/vendor/boxedwine26r1/boxedwine.html') && frame.contentDocument && frame.contentDocument.readyState !== 'loading';
     } catch (_) {
       return false;
     }
@@ -195,21 +195,22 @@
     return false;
   }
 
-  function waitForBridge(timeout = 30000) {
+  function waitForBridge(timeout = 60000) {
     return new Promise((resolve, reject) => {
-      const start = Date.now();
+      const started = Date.now();
       const tick = () => {
         try {
           injectBridge();
           const w = frame.contentWindow;
           if (boxedWineDocumentReady() && typeof w?.hotdBridgeSetPayload === 'function' && typeof w?.hotdBridgeStart === 'function') {
-            return resolve(w);
+            const state = typeof w.hotdBridgeStatus === 'function' ? w.hotdBridgeStatus() : null;
+            if (state?.bridgeReady && state?.fsReady && state?.configReady && state?.startReady) return resolve(w);
           }
         } catch (_) {}
-        if (Date.now() - start > timeout) {
+        if (Date.now() - started > timeout) {
           let href = 'unavailable';
           try { href = frame.contentWindow?.location?.href || href; } catch (_) {}
-          return reject(new Error(`BoxedWine personal bridge did not become ready; frame=${href}`));
+          return reject(new Error(`BoxedWine personal bridge/filesystem did not become ready; frame=${href}`));
         }
         setTimeout(tick, 150);
       };
@@ -223,7 +224,9 @@
     const runtime = await waitForBridge();
     const payload = toBase64(bytes);
     const mounted = runtime.hotdBridgeSetPayload(payload, 'rundemo.exe');
-    if (!mounted?.ok || !mounted?.payloadBytes) throw new Error('BoxedWine did not mount the private HOTD payload');
+    if (!mounted?.ok || !mounted?.payloadBytes || !mounted?.appZipReady) {
+      throw new Error('BoxedWine did not mount the private HOTD payload');
+    }
     setStatus('STARTING THE HOUSE OF THE DEAD', `${source} → BoxedWine/Wine6 → rundemo.exe`, 'ready');
     runtime.hotdBridgeStart();
     frame.scrollIntoView({ behavior: 'smooth', block: 'center' });
