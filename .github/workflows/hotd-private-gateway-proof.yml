@@ -1,0 +1,130 @@
+name: HOTD 1997 Private Gateway Proof
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'real-hotd.html'
+      - 'real-hotd-personal.js'
+      - 'hotd-boxedwine-bridge.js'
+      - 'vendor/boxedwine26r1/**'
+      - '.github/workflows/hotd-private-gateway-proof.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      PCZONE_CD_ARCHIVE: https://pixsoriginadventures.co.uk/PCZone/PC%20Zone%2067%20%28September%201998%29/CDZone%2367.rar
+      PCZONE_RAR_SHA256: 1a8695d904886e028b4e14aa59b85934c1d867ed03d2f3a18c9d202691efa1ba
+      HOTD_INSTALLER_SHA256: 6150da85cd5e7ba88bbe722aba8202d5f8726b66eb1e8614b2bda5e89ae76944
+      HOTD_ZIP_SHA256: 5421733293af7a57d5b7f3c4e4d53d52109c47be7b888f4b0308feb15f9ccfe6
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install helpers
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends curl unzip zip unar p7zip-full ccd2iso imagemagick
+          npm init -y >/dev/null 2>&1
+          npm install --silent playwright@1.55.0
+          npx playwright install --with-deps chromium >/dev/null
+          mkdir -p lab report
+      - name: Reconstruct verified demo ephemerally
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd lab
+          mkdir -p outer cdroot inner
+          curl -fL --retry 3 -o cd.rar "$PCZONE_CD_ARCHIVE"
+          test "$(sha256sum cd.rar | awk '{print $1}')" = "$PCZONE_RAR_SHA256"
+          unar -f -o outer cd.rar >/dev/null
+          IMG="$(find outer -type f -iname '*.img' -print -quit)"
+          ccd2iso "$IMG" cd.iso >/dev/null
+          7z x -y -ocdroot cd.iso >/dev/null
+          INSTALLER="$(find cdroot -type f -ipath '*/Gamedemo/Win95/hotd/Install.exe' -print -quit)"
+          test "$(sha256sum "$INSTALLER" | awk '{print $1}')" = "$HOTD_INSTALLER_SHA256"
+          7z x -y -oinner "$INSTALLER" >/dev/null
+          GAME="$(find inner -type d -iname hotd_demo -print -quit)"
+          test -f "$GAME/THOTDEMO.exe"
+          test -f "$GAME/rundemo.exe" -o -f "$GAME/RUNDEMO.EXE"
+          (cd "$GAME" && zip -qr "$GITHUB_WORKSPACE/hotd.zip" .)
+          test "$(sha256sum "$GITHUB_WORKSPACE/hotd.zip" | awk '{print $1}')" = "$HOTD_ZIP_SHA256"
+      - name: Serve checkout with temporary payload
+        shell: bash
+        run: |
+          python3 -m http.server 8000 --bind 127.0.0.1 > report/http.log 2>&1 &
+          echo $! > lab/http.pid
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8000/real-hotd.html >/dev/null && exit 0; sleep 1; done
+          exit 1
+      - name: Prove cache to bridge to Wine launch
+        shell: bash
+        run: |
+          cat > lab/proof.js <<'NODE'
+          const { chromium } = require('playwright');
+          const fs = require('fs');
+          const { execFileSync } = require('child_process');
+          function delta(a,b){try{execFileSync('compare',['-metric','AE',a,b,'null:'],{stdio:['ignore','pipe','pipe']});return 0}catch(e){const v=String(e.stderr||'').trim();return /^\d+$/.test(v)?Number(v):0}}
+          (async()=>{
+            const browser=await chromium.launch({headless:true,args:['--disable-dev-shm-usage','--enable-webgl','--enable-unsafe-swiftshader','--ignore-gpu-blocklist']});
+            const page=await browser.newPage({viewport:{width:1280,height:900}});
+            const logs=[], errors=[];
+            page.on('console',m=>logs.push(`[${m.type()}] ${m.text()}`));
+            page.on('pageerror',e=>errors.push(String(e)));
+            await page.goto('http://127.0.0.1:8000/',{waitUntil:'domcontentloaded'});
+            const bytes=fs.readFileSync('hotd.zip');
+            await page.evaluate(async (arr)=>{
+              const buffer=new Uint8Array(arr).buffer;
+              await new Promise((resolve,reject)=>{
+                const req=indexedDB.open('hotd-private-cache-v1',1);
+                req.onupgradeneeded=()=>{if(!req.result.objectStoreNames.contains('payloads'))req.result.createObjectStore('payloads')};
+                req.onerror=()=>reject(req.error);
+                req.onsuccess=()=>{
+                  const db=req.result, tx=db.transaction('payloads','readwrite');
+                  tx.objectStore('payloads').put({buffer,bytes:buffer.byteLength,sha256:'5421733293af7a57d5b7f3c4e4d53d52109c47be7b888f4b0308feb15f9ccfe6',savedAt:Date.now()},'hotd.zip');
+                  tx.oncomplete=()=>{db.close();resolve()}; tx.onerror=()=>reject(tx.error);
+                };
+              });
+            }, [...bytes]);
+            await page.goto('http://127.0.0.1:8000/real-hotd.html',{waitUntil:'domcontentloaded',timeout:30000});
+            await page.waitForTimeout(4000);
+            await page.screenshot({path:'lab/g0.png'});
+            await page.waitForTimeout(25000);
+            await page.screenshot({path:'lab/g1.png'});
+            const frame=page.frames().find(f=>f.url().includes('boxedwine.html'));
+            if(frame){
+              for(const key of ['Enter','Space','1','5']) await frame.locator('body').press(key).catch(()=>{});
+              await frame.locator('canvas').click({position:{x:320,y:240}}).catch(()=>{});
+            }
+            await page.waitForTimeout(12000);
+            await page.screenshot({path:'lab/g2.png'});
+            const boot=delta('lab/g0.png','lab/g1.png'), motion=delta('lab/g1.png','lab/g2.png');
+            const text=logs.join('\n')+'\n'+errors.join('\n');
+            const launch=/Launching .*wine/i.test(text);
+            const rundemo=/rundemo\.exe/i.test(text);
+            const crash=/(starting debugger|wine debugger|winedbg|unhandled page fault|unhandled exception|assertion failed|double free|segmentation fault|unimplemented function|failed to initialize|RuntimeError)/i.test(text);
+            const status=await page.locator('#statusText').textContent().catch(()=>null);
+            const pass=errors.length===0&&launch&&rundemo&&!crash&&boot>0&&motion>0;
+            fs.writeFileSync('report/final.env',[`PAGE_ERROR_COUNT=${errors.length}`,`WINE_LAUNCH=${launch}`,`RUNDEMO_SEEN=${rundemo}`,`CRASH_SIGNATURE=${crash}`,`BOOT_DELTA=${boot}`,`POST_INPUT_DELTA=${motion}`,`PAGE_STATUS=${status}`,`PRIVATE_GATEWAY_PASS=${pass}`].join('\n')+'\n');
+            fs.writeFileSync('report/console.log',text);
+            await browser.close();
+            process.exit(pass?0:2);
+          })().catch(e=>{console.error(e);process.exit(3)});
+          NODE
+          node lab/proof.js
+      - name: Cleanup payload
+        if: always()
+        run: |
+          kill "$(cat lab/http.pid 2>/dev/null)" 2>/dev/null || true
+          rm -f hotd.zip lab/g0.png lab/g1.png lab/g2.png
+      - name: Upload text-only proof
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hotd-private-gateway-proof
+          path: report
+          retention-days: 14
