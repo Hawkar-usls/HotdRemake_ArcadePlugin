@@ -1,0 +1,64 @@
+name: HOTD 1997 User Payload
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hotd1997-user-payload.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-payload:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      PCZONE_CD_ARCHIVE: https://pixsoriginadventures.co.uk/PCZone/PC%20Zone%2067%20%28September%201998%29/CDZone%2367.rar
+      PCZONE_RAR_SHA256: 1a8695d904886e028b4e14aa59b85934c1d867ed03d2f3a18c9d202691efa1ba
+      HOTD_INSTALLER_SHA256: 6150da85cd5e7ba88bbe722aba8202d5f8726b66eb1e8614b2bda5e89ae76944
+    steps:
+      - name: Install extraction tools
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends curl unzip zip unar p7zip-full ccd2iso
+          mkdir -p lab/out
+
+      - name: Extract verified HOTD demo
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd lab
+          curl --fail --location --retry 3 -o cdzone67.rar "$PCZONE_CD_ARCHIVE"
+          test "$(sha256sum cdzone67.rar | awk '{print $1}')" = "$PCZONE_RAR_SHA256"
+          mkdir -p cd-outer cd-root installer-inner
+          unar -f -o cd-outer cdzone67.rar >/dev/null
+          IMG="$(find cd-outer -type f -iname '*.img' -print -quit)"
+          test -n "$IMG"
+          ccd2iso "$IMG" cdzone67.iso >/dev/null
+          7z x -y -ocd-root cdzone67.iso >/dev/null
+          INSTALLER="$(find cd-root -type f -ipath '*/Gamedemo/Win95/hotd/Install.exe' -print -quit)"
+          test -n "$INSTALLER"
+          test "$(sha256sum "$INSTALLER" | awk '{print $1}')" = "$HOTD_INSTALLER_SHA256"
+          7z x -y -oinstaller-inner "$INSTALLER" >/dev/null
+          GAME_DIR="$(find installer-inner -type d -iname hotd_demo -print -quit)"
+          test -n "$GAME_DIR"
+          test -f "$GAME_DIR/THOTDEMO.exe"
+          test -f "$GAME_DIR/RUNDEMO.EXE" || test -f "$GAME_DIR/rundemo.exe"
+          (cd "$GAME_DIR" && zip -qr "$GITHUB_WORKSPACE/lab/out/hotd.zip" .)
+          sha256sum out/hotd.zip > out/hotd.zip.sha256
+          find "$GAME_DIR" -maxdepth 1 -type f -printf '%f\t%s\n' | sort > out/hotd-files.tsv
+          stat -c '%n\t%s bytes' out/hotd.zip > out/payload-size.txt
+
+      - name: Upload temporary user payload
+        uses: actions/upload-artifact@v4
+        with:
+          name: hotd1997-user-payload
+          path: |
+            lab/out/hotd.zip
+            lab/out/hotd.zip.sha256
+            lab/out/hotd-files.tsv
+            lab/out/payload-size.txt
+          retention-days: 1
