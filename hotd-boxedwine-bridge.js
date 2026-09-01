@@ -1,6 +1,7 @@
 (() => {
   'use strict';
 
+  // v3: inject only into the real BoxedWine document and wait for its FS.
   function bridgeStatus() {
     let appZipReady = false;
     const fsReady = typeof FS !== 'undefined' && typeof FS.writeFile === 'function';
