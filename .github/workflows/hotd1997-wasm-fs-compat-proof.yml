@@ -1,0 +1,169 @@
+name: HOTD 1997 WASM FS Compat Proof
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/hotd1997-wasm-fs-compat-proof.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  wasm-fs-compat:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    env:
+      BOXEDWINE_SOURCE_SHA: 5a2195ba47a169455c2dbe6bcb4bae4c256c9bad
+      WINE17_ROOT_URL: https://sourceforge.net/projects/boxedwine/files/FileSystems/Full/v5/Debian10-Wine-1.7.zip/download
+      WINE17_ROOT_SHA256: b331eaa21c035c55a81fe260777f129962d2d6b8fb47a6cec1258f3a56bc8b98
+      PCZONE_CD_ARCHIVE: https://pixsoriginadventures.co.uk/PCZone/PC%20Zone%2067%20%28September%201998%29/CDZone%2367.rar
+      PCZONE_RAR_SHA256: 1a8695d904886e028b4e14aa59b85934c1d867ed03d2f3a18c9d202691efa1ba
+      HOTD_INSTALLER_SHA256: 6150da85cd5e7ba88bbe722aba8202d5f8726b66eb1e8614b2bda5e89ae76944
+    steps:
+      - name: Install helpers
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq --no-install-recommends git curl unzip zip unar p7zip-full ccd2iso python3 imagemagick
+          mkdir -p lab site report
+
+      - name: Checkout BoxedWine 20.1.2
+        shell: bash
+        run: |
+          set -euo pipefail
+          git clone -q https://github.com/danoon2/Boxedwine.git lab/Boxedwine
+          cd lab/Boxedwine
+          git checkout -q "$BOXEDWINE_SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$BOXEDWINE_SOURCE_SHA"
+
+      - name: Setup Emscripten 2.0.8
+        uses: mymindstorm/setup-emsdk@v14
+        with:
+          version: 2.0.8
+
+      - name: Build and patch legacy FS API
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd lab/Boxedwine/project/emscripten
+          sh buildjs.sh > "$GITHUB_WORKSPACE/report/build.log" 2>&1
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('boxedwine-shell.js')
+          s=p.read_text()
+          old=s.count('FS.createFolder(')
+          assert old > 0, old
+          shim=r'''
+          // JANUS compatibility shim: Emscripten removed FS.createFolder; preserve
+          // the historical BoxedWine call contract without modifying upstream source.
+          function BWFS_createFolder(parent, name, canRead, canWrite) {
+              var base = (typeof parent === 'string') ? parent : FS.getPath(parent);
+              base = base === '/' ? '' : base.replace(/\/+$/, '');
+              var path = base + '/' + name;
+              try {
+                  if (FS.analyzePath && FS.analyzePath(path).exists) return FS.lookupPath(path).node;
+              } catch (_) {}
+              return FS.mkdir(path);
+          }
+          '''
+          s=shim+s.replace('FS.createFolder(', 'BWFS_createFolder(')
+          p.write_text(s)
+          print('FS_CREATEFOLDER_REPLACED='+str(old))
+          PY
+          test -s boxedwine.html && test -s boxedwine.js && test -s boxedwine.wasm
+          ! grep -q 'FS.createFolder(' boxedwine-shell.js
+          cp boxedwine.html boxedwine.js boxedwine.wasm boxedwine.css boxedwine-shell.js browserfs.boxedwine.js jszip.min.js "$GITHUB_WORKSPACE/site/"
+          echo WASM_BUILD_AND_FS_SHIM_PASS=true | tee "$GITHUB_WORKSPACE/report/build-gate.env"
+
+      - name: Fetch verified Wine root and HOTD demo ephemerally
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$GITHUB_WORKSPACE/site"
+          curl --fail --location --retry 3 -o Debian10-Wine-1.7.zip "$WINE17_ROOT_URL"
+          test "$(sha256sum Debian10-Wine-1.7.zip | awk '{print $1}')" = "$WINE17_ROOT_SHA256"
+          cd "$GITHUB_WORKSPACE/lab"
+          mkdir -p cd-outer cd-root installer-inner
+          curl --fail --location --retry 3 -o cdzone67.rar "$PCZONE_CD_ARCHIVE"
+          test "$(sha256sum cdzone67.rar | awk '{print $1}')" = "$PCZONE_RAR_SHA256"
+          unar -f -o cd-outer cdzone67.rar >/dev/null
+          IMG="$(find cd-outer -type f -iname '*.img' -print -quit)"
+          ccd2iso "$IMG" cdzone67.iso >/dev/null
+          7z x -y -ocd-root cdzone67.iso >/dev/null
+          INSTALLER="$(find cd-root -type f -ipath '*/Gamedemo/Win95/hotd/Install.exe' -print -quit)"
+          test "$(sha256sum "$INSTALLER" | awk '{print $1}')" = "$HOTD_INSTALLER_SHA256"
+          7z x -y -oinstaller-inner "$INSTALLER" >/dev/null
+          GAME_DIR="$(find installer-inner -type d -iname hotd_demo -print -quit)"
+          test -f "$GAME_DIR/THOTDEMO.exe"
+          test -f "$GAME_DIR/RUNDEMO.EXE" || test -f "$GAME_DIR/rundemo.exe"
+          (cd "$GAME_DIR" && zip -qr "$GITHUB_WORKSPACE/site/hotd.zip" .)
+          echo PACKAGE_IDENTITY_PASS=true | tee "$GITHUB_WORKSPACE/report/package-gate.env"
+          echo HOTD_BINARY_PERSISTED=NO >> "$GITHUB_WORKSPACE/report/package-gate.env"
+
+      - name: Install Chromium
+        shell: bash
+        run: |
+          cd lab
+          npm init -y >/dev/null 2>&1
+          npm install --silent playwright@1.55.0
+          npx playwright install --with-deps chromium >/dev/null
+
+      - name: Serve runtime
+        shell: bash
+        run: |
+          cd site
+          python3 -m http.server 8000 --bind 127.0.0.1 > ../report/http.log 2>&1 &
+          echo $! > ../lab/http.pid
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8000/boxedwine.html >/dev/null && exit 0; sleep 1; done
+          exit 1
+
+      - name: Prove HOTD motion in Chromium
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd lab
+          cat > proof.js <<'NODE'
+          const {chromium}=require('playwright'); const fs=require('fs'); const {execFileSync}=require('child_process');
+          function delta(a,b){try{execFileSync('compare',['-metric','AE',a,b,'null:'],{stdio:['ignore','pipe','pipe']});return 0}catch(e){const v=String(e.stderr||'').trim();return /^\d+$/.test(v)?Number(v):0}}
+          (async()=>{
+            const out=process.env.GITHUB_WORKSPACE+'/report', tmp=process.env.RUNNER_TEMP, logs=[], errs=[];
+            const browser=await chromium.launch({headless:true,args:['--disable-dev-shm-usage','--use-gl=swiftshader','--enable-webgl','--ignore-gpu-blocklist']});
+            const page=await browser.newPage({viewport:{width:1024,height:768}}); page.on('console',m=>logs.push(`[${m.type()}] ${m.text()}`)); page.on('pageerror',e=>errs.push(String(e)));
+            const url='http://127.0.0.1:8000/boxedwine.html?root=Debian10-Wine-1.7&app=hotd&p=THOTDEMO.exe&bpp=16&sound=false&auto=true';
+            await page.goto(url,{waitUntil:'domcontentloaded',timeout:30000}); await page.screenshot({path:tmp+'/f0.png'});
+            await page.waitForTimeout(12000); await page.screenshot({path:tmp+'/f1.png'});
+            await page.keyboard.press('Enter').catch(()=>{}); await page.mouse.click(512,384).catch(()=>{});
+            await page.waitForTimeout(8000); await page.screenshot({path:tmp+'/f2.png'});
+            const d01=delta(tmp+'/f0.png',tmp+'/f1.png'), d12=delta(tmp+'/f1.png',tmp+'/f2.png');
+            const text=logs.join('\n')+'\n'+errs.join('\n'); const crash=/(abort\(|RuntimeError|unhandled exception|segmentation fault|assertion failed|double free|corruption)/i.test(text);
+            const fsError=/FS\.createFolder is not a function/i.test(text); const pass=errs.length===0&&!crash&&!fsError&&d01>0&&d12>0;
+            fs.writeFileSync(out+'/browser-console.log',logs.join('\n')+'\n'); fs.writeFileSync(out+'/browser-errors.log',errs.join('\n')+'\n');
+            fs.writeFileSync(out+'/motion-gate.env',[`PAGE_ERROR_COUNT=${errs.length}`,`FS_COMPAT_ERROR=${fsError}`,`CRASH_SIGNATURE=${crash}`,`BOOT_DELTA=${d01}`,`MOTION_DELTA=${d12}`,`HOTD_WASM_PLAYABLE_MOTION_PASS=${pass}`].join('\n')+'\n');
+            console.log(fs.readFileSync(out+'/motion-gate.env','utf8')); await browser.close(); process.exit(pass?0:2);
+          })().catch(e=>{console.error(e);process.exit(3)});
+          NODE
+          set +e
+          node proof.js
+          RC=$?
+          set -e
+          rm -f ../site/hotd.zip "$RUNNER_TEMP/f0.png" "$RUNNER_TEMP/f1.png" "$RUNNER_TEMP/f2.png"
+          echo PROOF_EXIT_CODE=$RC >> ../report/motion-gate.env
+          test "$RC" -eq 0
+
+      - name: Cleanup and upload text-only evidence
+        if: always()
+        shell: bash
+        run: |
+          kill "$(cat lab/http.pid 2>/dev/null)" 2>/dev/null || true
+          rm -f site/hotd.zip
+
+      - name: Upload evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: hotd1997-wasm-fs-compat-report
+          path: report
+          retention-days: 30
