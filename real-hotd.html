@@ -18,19 +18,19 @@
     <section class="hero">
       <div class="status"><span class="lamp"></span><div><div id="statusText">INITIALIZING</div><div id="statusDetail">Preparing the private launch route…</div></div></div>
       <h2>Your private copy. Straight into BoxedWine.</h2>
-      <p>This route never publishes <code>hotd.zip</code> on GitHub Pages. After Google authorization, the page reads your private Drive file into browser memory, verifies its size and SHA-256, mounts it into the same-origin BoxedWine 26R1/Wine 6 runtime, and starts <code>rundemo.exe</code>.</p>
-      <div class="route"><b>PLAY</b> → Google Drive OAuth → private <b>hotd.zip</b> → browser RAM → BoxedWine/Wine6 → <b>c:/files/rundemo.exe</b></div>
-      <div class="actions"><button class="btn play" id="play" type="button">▶ PLAY FROM MY DRIVE</button><a class="btn" href="https://drive.google.com/file/d/1ammROnbRNYVlqbiaBcSUJcLqTDZjClm-/view" target="_blank" rel="noreferrer">MY DRIVE COPY ↗</a></div>
+      <p>The verified <code>hotd.zip</code> now lives in your private Google Drive. On the first authorized launch the page verifies its exact SHA-256 and caches a private copy in this browser. After that, this browser can auto-start HOTD without downloading the game again.</p>
+      <div class="route"><b>FIRST RUN</b> → Google Drive read-only → verify SHA-256 → private browser cache → BoxedWine/Wine6 → <b>rundemo.exe</b><br><b>NEXT RUNS</b> → browser cache → BoxedWine/Wine6 → <b>rundemo.exe</b></div>
+      <div class="actions"><button class="btn play" id="play" type="button">▶ PLAY FROM MY DRIVE</button><a class="btn" href="https://drive.google.com/file/d/1QWJJNKgCC-tpTAaJg72zJRr6dCpSlHp_/view" target="_blank" rel="noreferrer">MY DRIVE COPY ↗</a></div>
       <div class="oauth" id="oauthBox" hidden>
         <b>ONE-TIME GOOGLE OAUTH CLIENT ID</b>
-        <p>GitHub Pages is a static site, so Google requires a Web OAuth client ID for this origin. Paste it once; it is stored only in this browser's localStorage.</p>
+        <p>Because the archive is private and GitHub Pages is static, Google requires a Web OAuth client ID for this origin on the first Drive fetch. Paste it once; it is stored only in this browser. After the verified archive is cached, later launches do not need Drive access.</p>
         <div class="oauthRow"><input id="clientId" autocomplete="off" spellcheck="false" placeholder="xxxxxxxx.apps.googleusercontent.com"><button id="saveClient" class="btn" type="button">SAVE</button></div>
       </div>
-      <div class="chips"><span class="chip">DRIVE FILE: PRIVATE</span><span class="chip">EXPECTED ZIP: 16,078,013 B</span><span class="chip">RUNTIME: BOXEDWINE 26R1 / WINE6</span><span class="chip warn">PUBLIC GAME BODY: NO</span></div>
+      <div class="chips"><span class="chip">DRIVE FILE: PRIVATE</span><span class="chip">EXPECTED ZIP: 16,078,013 B</span><span class="chip">SHA-256 LOCKED</span><span class="chip">RUNTIME: BOXEDWINE 26R1 / WINE6</span><span class="chip warn">PUBLIC GAME BODY: NO</span></div>
       <div class="runtimeWrap" id="runtimeWrap" hidden><iframe id="runtime" src="about:blank" allow="autoplay; fullscreen; gamepad; clipboard-read; clipboard-write"></iframe></div>
-      <p class="privacy">The Google access token and game bytes are kept in the current browser session only. The page asks for read-only Drive scope and does not upload the archive to this repository.</p>
+      <p class="privacy">The Google access token stays in the browser session. The game archive is never committed to this repository or published by GitHub Pages.</p>
     </section>
   </main>
-  <script src="./real-hotd-personal.js?v=1"></script>
+  <script src="./real-hotd-personal.js?v=2"></script>
 </body>
 </html>
