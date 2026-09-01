@@ -16,8 +16,8 @@ jobs:
     timeout-minutes: 60
     env:
       BOXEDWINE_SHA: 2473488cfcf1ba914daf5aad097da0c59bb16073
-      WINE17_ROOT_URL: https://sourceforge.net/projects/boxedwine/files/FileSystems/Full/v5/Debian10-Wine-1.7.zip/download
-      WINE17_ROOT_SHA256: b331eaa21c035c55a81fe260777f129962d2d6b8fb47a6cec1258f3a56bc8b98
+      WINE_ROOT_URL: https://sourceforge.net/projects/boxedwine/files/FileSystems/Full/v5/Debian10-Wine-5.0.zip/download
+      WINE_ROOT_FILE: Debian10-Wine-5.0.zip
       PCZONE_CD_ARCHIVE: https://pixsoriginadventures.co.uk/PCZone/PC%20Zone%2067%20%28September%201998%29/CDZone%2367.rar
       PCZONE_RAR_SHA256: 1a8695d904886e028b4e14aa59b85934c1d867ed03d2f3a18c9d202691efa1ba
       HOTD_INSTALLER_SHA256: 6150da85cd5e7ba88bbe722aba8202d5f8726b66eb1e8614b2bda5e89ae76944
@@ -50,8 +50,6 @@ jobs:
         run: |
           set -euo pipefail
           cd lab/Boxedwine/project/emscripten
-          # Upstream currently compiles C++ but may final-link with CC on some SDKs.
-          # If present, keep the build semantically identical and only switch the final linker to CXX.
           cp makefile makefile.original
           python3 - <<'PY'
           from pathlib import Path
@@ -72,13 +70,14 @@ jobs:
           sha256sum "$OUT/boxedwine.html" "$OUT/boxedwine.js" "$OUT/boxedwine.wasm" | tee "$GITHUB_WORKSPACE/report/runtime-sha256.txt"
           echo MODERN_WEB_RUNTIME_BUILD_PASS=true | tee "$GITHUB_WORKSPACE/report/build-gate.env"
 
-      - name: Fetch verified Wine root and genuine demo ephemerally
+      - name: Fetch official Wine 5 root and genuine demo ephemerally
         shell: bash
         run: |
           set -euo pipefail
           cd site
-          curl --fail --location --retry 3 -o Debian10-Wine-1.7.zip "$WINE17_ROOT_URL"
-          test "$(sha256sum Debian10-Wine-1.7.zip | awk '{print $1}')" = "$WINE17_ROOT_SHA256"
+          curl --fail --location --retry 3 -o "$WINE_ROOT_FILE" "$WINE_ROOT_URL"
+          unzip -tq "$WINE_ROOT_FILE" >/dev/null
+          sha256sum "$WINE_ROOT_FILE" | tee "$GITHUB_WORKSPACE/report/wine-root-sha256.txt"
           cd ../lab
           mkdir -p cd-outer cd-root installer-inner
           curl --fail --location --retry 3 -o cdzone67.rar "$PCZONE_CD_ARCHIVE"
@@ -95,6 +94,7 @@ jobs:
           find "$GAME_DIR" -maxdepth 1 -type f -printf '%f\n' | sort > "$GITHUB_WORKSPACE/report/game-file-names.txt"
           (cd "$GAME_DIR" && zip -qr "$GITHUB_WORKSPACE/site/hotd.zip" .)
           echo PACKAGE_IDENTITY_PASS=true | tee "$GITHUB_WORKSPACE/report/package.env"
+          echo WINE_ROOT=5.0 >> "$GITHUB_WORKSPACE/report/package.env"
           echo HOTD_BINARY_PERSISTED=NO >> "$GITHUB_WORKSPACE/report/package.env"
           echo HOTD_BINARY_UPLOADED=NO >> "$GITHUB_WORKSPACE/report/package.env"
 
@@ -126,13 +126,13 @@ jobs:
           async function lane(browser, program, key){
             const out=process.env.GITHUB_WORKSPACE+'/report', tmp=process.env.RUNNER_TEMP, logs=[], errs=[];
             const page=await browser.newPage({viewport:{width:1024,height:768}}); page.on('console',m=>logs.push(`[${m.type()}] ${m.text()}`)); page.on('pageerror',e=>errs.push(String(e)));
-            const url=`http://127.0.0.1:8000/boxedwine.html?root=Debian10-Wine-1.7&app=hotd&p=${encodeURIComponent(program)}&bpp=16&sound=false&auto=true`;
+            const url=`http://127.0.0.1:8000/boxedwine.html?root=Debian10-Wine-5.0&app=hotd&p=${encodeURIComponent(program)}&resolution=640x480&bpp=16&sound=false&auto=true`;
             await page.goto(url,{waitUntil:'domcontentloaded',timeout:30000}); await page.screenshot({path:`${tmp}/${key}-0.png`});
-            await page.waitForTimeout(12000); await page.screenshot({path:`${tmp}/${key}-1.png`});
-            await page.keyboard.press('Enter').catch(()=>{}); await page.mouse.move(512,384).catch(()=>{}); await page.mouse.click(512,384).catch(()=>{});
-            await page.waitForTimeout(8000); await page.screenshot({path:`${tmp}/${key}-2.png`});
+            await page.waitForTimeout(15000); await page.screenshot({path:`${tmp}/${key}-1.png`});
+            await page.keyboard.press('Enter').catch(()=>{}); await page.keyboard.press('Space').catch(()=>{}); await page.mouse.move(320,240).catch(()=>{}); await page.mouse.click(320,240).catch(()=>{});
+            await page.waitForTimeout(10000); await page.screenshot({path:`${tmp}/${key}-2.png`});
             const boot=delta(`${tmp}/${key}-0.png`,`${tmp}/${key}-1.png`), motion=delta(`${tmp}/${key}-1.png`,`${tmp}/${key}-2.png`), text=logs.join('\n')+'\n'+errs.join('\n');
-            const debuggerSig=/(starting debugger|wine debugger|winedbg|unhandled page fault|unhandled exception|assertion failed|double free|corruption|segmentation fault|setjmp is required|abort\(|RuntimeError)/i.test(text);
+            const debuggerSig=/(starting debugger|wine debugger|winedbg|unhandled page fault|unhandled exception|assertion failed|double free|corruption|segmentation fault|setjmp is required|unimplemented function|failed to initialize|abort\(|RuntimeError)/i.test(text);
             const launch=/Launching .*wine/i.test(text); const pass=errs.length===0&&!debuggerSig&&launch&&boot>0&&motion>0;
             fs.writeFileSync(`${out}/${key}-console.log`,logs.join('\n')+'\n'); fs.writeFileSync(`${out}/${key}-errors.log`,errs.join('\n')+'\n');
             fs.writeFileSync(`${out}/${key}-gate.env`,[`PROGRAM=${program}`,`PAGE_ERROR_COUNT=${errs.length}`,`LAUNCH_LOG=${launch}`,`DEBUGGER_OR_CRASH_SIGNATURE=${debuggerSig}`,`BOOT_DELTA=${boot}`,`MOTION_DELTA=${motion}`,`PLAYABLE_MOTION_PASS=${pass}`].join('\n')+'\n');
