@@ -1,12 +1,15 @@
 (() => {
   'use strict';
 
-  const DRIVE_FILE_ID = '1ammROnbRNYVlqbiaBcSUJcLqTDZjClm-';
+  const DRIVE_FILE_ID = '1QWJJNKgCC-tpTAaJg72zJRr6dCpSlHp_';
   const EXPECTED_BYTES = 16078013;
   const EXPECTED_SHA256 = '5421733293af7a57d5b7f3c4e4d53d52109c47be7b888f4b0308feb15f9ccfe6';
   const SCOPE = 'https://www.googleapis.com/auth/drive.readonly';
   const RUNTIME_URL = './vendor/boxedwine26r1/boxedwine.html?auto=false&resolution=640x480&bpp=16&sound=true&disableHideCursor=true&storage=memory';
-  const BRIDGE_URL = new URL('./hotd-boxedwine-bridge.js', location.href).href;
+  const BRIDGE_URL = new URL('./hotd-boxedwine-bridge.js?v=2', location.href).href;
+  const DB_NAME = 'hotd-private-cache-v1';
+  const DB_STORE = 'payloads';
+  const DB_KEY = 'hotd.zip';
 
   const $ = (id) => document.getElementById(id);
   const play = $('play');
@@ -26,6 +29,64 @@
     status.textContent = title;
     detail.textContent = text || '';
     document.body.dataset.state = kind;
+  }
+
+  function openDb() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(DB_NAME, 1);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(DB_STORE)) db.createObjectStore(DB_STORE);
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error || new Error('IndexedDB open failed'));
+    });
+  }
+
+  async function cacheGet() {
+    const db = await openDb();
+    try {
+      return await new Promise((resolve, reject) => {
+        const tx = db.transaction(DB_STORE, 'readonly');
+        const req = tx.objectStore(DB_STORE).get(DB_KEY);
+        req.onsuccess = () => resolve(req.result || null);
+        req.onerror = () => reject(req.error);
+      });
+    } finally { db.close(); }
+  }
+
+  async function cachePut(buffer) {
+    const db = await openDb();
+    try {
+      await new Promise((resolve, reject) => {
+        const tx = db.transaction(DB_STORE, 'readwrite');
+        tx.objectStore(DB_STORE).put({
+          buffer,
+          bytes: buffer.byteLength,
+          sha256: EXPECTED_SHA256,
+          savedAt: Date.now()
+        }, DB_KEY);
+        tx.oncomplete = resolve;
+        tx.onerror = () => reject(tx.error);
+      });
+      if (navigator.storage?.persist) navigator.storage.persist().catch(() => {});
+    } finally { db.close(); }
+  }
+
+  async function verifyBuffer(buffer) {
+    if (!(buffer instanceof ArrayBuffer)) throw new Error('HOTD payload is not an ArrayBuffer');
+    if (buffer.byteLength !== EXPECTED_BYTES) throw new Error(`Unexpected hotd.zip size: ${buffer.byteLength} bytes`);
+    const hash = await crypto.subtle.digest('SHA-256', buffer);
+    const hex = [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, '0')).join('');
+    if (hex !== EXPECTED_SHA256) throw new Error(`hotd.zip hash mismatch: ${hex}`);
+    return buffer;
+  }
+
+  async function getCachedBuffer() {
+    const entry = await cacheGet().catch(() => null);
+    if (!entry?.buffer || entry.bytes !== EXPECTED_BYTES || entry.sha256 !== EXPECTED_SHA256) return null;
+    try { return await verifyBuffer(entry.buffer); }
+    catch (_) { return null; }
   }
 
   function getClientId() {
@@ -49,7 +110,7 @@
     localStorage.setItem('hotd_google_client_id', value);
     oauthBox.hidden = true;
     tokenClient = null;
-    setStatus('PRIVATE DRIVE GATE READY', 'Press PLAY. Google will ask for read-only Drive access.', 'ready');
+    setStatus('PRIVATE DRIVE GATE READY', 'Press PLAY once. After a verified fetch, hotd.zip is cached locally for future auto-start.', 'ready');
   }
 
   function waitForGoogle(timeout = 15000) {
@@ -88,15 +149,14 @@
     });
     if (!response.ok) throw new Error(`Drive download failed: HTTP ${response.status}`);
     const buffer = await response.arrayBuffer();
-    if (buffer.byteLength !== EXPECTED_BYTES) throw new Error(`Unexpected hotd.zip size: ${buffer.byteLength} bytes`);
-    const hash = await crypto.subtle.digest('SHA-256', buffer);
-    const hex = [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, '0')).join('');
-    if (hex !== EXPECTED_SHA256) throw new Error(`hotd.zip hash mismatch: ${hex}`);
-    return new Uint8Array(buffer);
+    await verifyBuffer(buffer);
+    setStatus('PRIVATE COPY VERIFIED', 'SHA-256 matches. Saving an encrypted-origin browser copy for future launches…', 'busy');
+    await cachePut(buffer);
+    return buffer;
   }
 
   function toBase64(bytes) {
-    setStatus('ARMING BOXEDWINE', 'Verified demo is being mounted from RAM…', 'busy');
+    setStatus('ARMING BOXEDWINE', 'Verified demo is being mounted into the emulator filesystem…', 'busy');
     const parts = [];
     const size = 0x8000;
     for (let i = 0; i < bytes.length; i += size) {
@@ -141,31 +201,43 @@
     });
   }
 
+  async function launchBuffer(buffer, source) {
+    const bytes = new Uint8Array(buffer);
+    bridgeInjected = false;
+    loadRuntime();
+    const runtime = await waitForBridge();
+    const payload = toBase64(bytes);
+    const mounted = runtime.hotdBridgeSetPayload(payload, 'rundemo.exe');
+    if (!mounted?.ok || !mounted?.payloadBytes) throw new Error('BoxedWine did not mount the private HOTD payload');
+    setStatus('STARTING THE HOUSE OF THE DEAD', `${source} → BoxedWine/Wine6 → rundemo.exe`, 'ready');
+    runtime.hotdBridgeStart();
+    frame.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
   async function launch() {
     if (busy) return;
-    const clientId = getClientId();
-    if (!clientId) {
-      oauthBox.hidden = false;
-      clientInput.focus();
-      setStatus('ONE-TIME GOOGLE SETUP', 'This private route needs your Google Web OAuth client ID once. It is stored only in this browser.', 'warn');
-      return;
-    }
-
     busy = true;
     play.disabled = true;
     try {
+      const cached = await getCachedBuffer();
+      if (cached) {
+        await launchBuffer(cached, 'PRIVATE BROWSER CACHE');
+        return;
+      }
+
+      const clientId = getClientId();
+      if (!clientId) {
+        oauthBox.hidden = false;
+        clientInput.focus();
+        setStatus('ONE-TIME GOOGLE SETUP', 'Google requires a Web OAuth client ID for a private Drive file. After the first verified fetch, later launches use the browser cache and no Drive download is needed.', 'warn');
+        return;
+      }
+
       await waitForGoogle();
-      setStatus('GOOGLE DRIVE SIGN-IN', 'Authorize read-only access to your Drive copy.', 'busy');
+      setStatus('GOOGLE DRIVE SIGN-IN', 'Authorize read-only access to your private Drive copy once.', 'busy');
       const accessToken = await requestToken(clientId);
-      const bytes = await fetchPrivateZip(accessToken);
-      bridgeInjected = false;
-      loadRuntime();
-      const runtime = await waitForBridge();
-      const payload = toBase64(bytes);
-      runtime.hotdBridgeSetPayload(payload, 'c:/files/rundemo.exe');
-      setStatus('STARTING THE HOUSE OF THE DEAD', 'Private Drive → RAM → BoxedWine. No game file is being published by this page.', 'ready');
-      runtime.hotdBridgeStart();
-      frame.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const buffer = await fetchPrivateZip(accessToken);
+      await launchBuffer(buffer, 'PRIVATE DRIVE');
     } catch (err) {
       console.error(err);
       setStatus('LAUNCH FAILED', err?.message || String(err), 'fail');
@@ -180,11 +252,19 @@
   clientInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') saveClientId(); });
   frame.addEventListener('load', () => { try { injectBridge(); } catch (_) {} });
 
-  const existing = getClientId();
-  if (existing) {
-    clientInput.value = existing;
-    setStatus('PRIVATE DRIVE GATE READY', 'Press PLAY. Your hotd.zip stays private in Google Drive.', 'ready');
-  } else {
-    setStatus('PRIVATE DRIVE GATE BUILT', 'One-time Google OAuth client ID setup remains before PLAY can authenticate to your Drive.', 'warn');
-  }
+  (async () => {
+    const cached = await getCachedBuffer();
+    if (cached) {
+      setStatus('PRIVATE HOTD CACHED', 'Verified copy found in this browser. Auto-starting…', 'ready');
+      setTimeout(() => launch(), 250);
+      return;
+    }
+    const existing = getClientId();
+    if (existing) {
+      clientInput.value = existing;
+      setStatus('PRIVATE DRIVE GATE READY', 'Press PLAY once. Future launches can auto-start from this browser.', 'ready');
+    } else {
+      setStatus('PRIVATE DRIVE GATE BUILT', 'Runtime and private Drive source are wired. One-time Google OAuth client setup remains before the first fetch.', 'warn');
+    }
+  })();
 })();
